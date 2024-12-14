@@ -1,0 +1,32 @@
+defaults:
+  - _self_
+
+exp_name: eurosat_spatial_0776
+
+model:
+  name: resnet50
+  weights: true
+  in_channels: 13
+  num_classes: 10
+  loss: ce
+  lr: 0.0001
+  patience: 7
+
+trainer: 
+  devices: 1
+  fast_dev_run: false
+  min_epochs: 1
+  max_epochs: 50
+
+data:
+  root: "./data_spatial_eurosat"
+  batch_size: 64
+  num_workers: 8
+  download: true
+  checksum: true
+
+logging:
+  path: ./geospatial-ood-detection/experiments
+
+training:
+  patience: 5

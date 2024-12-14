@@ -1,0 +1,40 @@
+defaults:
+  - _self_
+
+exp_name: "xview2_hurricane-matthew_mexico-earthquake_01"
+
+id_ood_disaster: [{"disaster_name": "hurricane-matthew", "pre-post": "post"}, {"disaster_name": "mexico-earthquake", "pre-post": "post"}]
+
+paths:
+  root: "./xview2/xview2/geotiffs"
+  default_root_dir: "experiments"
+
+dataset:
+  checksum: false
+
+training:
+  batch_size: 32
+  val_split_pct: 0.2
+  max_epochs: 25
+  min_epochs: 1
+  early_stopping_patience: 5
+  random_crop: 256
+  devices: 1
+  patience: 5
+  pin_memory: False
+  persistent_workers: False
+  num_workers: 0
+
+model:
+  type: "unet"
+  backbone: "resnet50"
+  weights: true
+  in_channels: 3
+  num_classes: 2
+  lr: 0.001
+  task_patience: 5
+  freeze_backbone: True
+  freeze_decoder: False
+
+logging:
+  path: ./geospatial-ood-detection/experiments

@@ -1,0 +1,34 @@
+defaults:
+  - _self_
+
+exp_name: Holdout_HerbaceousVegetation_resnet50_0066
+
+model:
+  name: resnet50
+  weights: true
+  in_channels: 13
+  num_classes: 9
+  loss: ce
+  lr: 0.0001
+  patience: 5
+
+trainer: 
+  devices: 1
+  fast_dev_run: false
+  min_epochs: 1
+  max_epochs: 50
+
+data:
+  class_name: HerbaceousVegetation
+  root: "./eurosat_holdout_HerbaceousVegetation"
+  batch_size: 64
+  num_workers: 8
+  exclude_class: HerbaceousVegetation
+  download: true
+  checksum: true
+
+logging:
+  path: ./geospatial-ood-detection/experiments
+
+training:
+  patience: 5

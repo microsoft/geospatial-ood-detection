@@ -1,0 +1,59 @@
+base_dir: "./"
+paths:  
+  model_checkpoint: "exp_data/FTW-25-Experiment-1-1-4_model.ckpt"  
+  root_folder_torchgeo: "FTW_TorchGeo"  
+  path_wild_patches: "FTW_WILD_PATCHES_all/ftw_ood_wild_s2_patches_all"  
+dataloader:  
+  batch_size: 8  
+  num_workers: 0  
+  sample_N_from_each_country: 20  
+  all_countries:   
+    - belgium  
+    - cambodia  
+    - croatia  
+    - estonia  
+    - portugal  
+    - slovakia  
+    - south_africa  
+    - sweden  
+    - austria  
+    - brazil  
+    - corsica  
+    - denmark  
+    - france  
+    - india  
+    - latvia  
+    - luxembourg  
+    - finland  
+    - germany  
+    - kenya  
+    - lithuania  
+    - netherlands  
+    - rwanda  
+    - slovenia  
+    - spain  
+    - vietnam  
+  val_countries:   
+    - portugal  
+    - germany  
+  test_countries:   
+    - rwanda  
+    - slovenia  
+  target: "3-class"  
+ood_detector:  
+  chosen_layer: "decoder.blocks.0.conv1"  
+  resize_factor: 2  
+  id_fraction_thr: 0.1  
+  n_batches_to_process: null  
+  random_state: 31  
+  estimators: 100  
+  test_size: 0.2  
+  use_optuna: false  
+  patch_size: 256
+storage_account: "STORAGE ACCOUNT"  
+container_name: "CONTAINER"  
+sas_key: ""  
+num_pairs: 10000  
+s2_parquet_fn: "ftw_ood/s2l2a_5_17_2023_clouds_lt_20_date_gt_2021-01-01_land_masked.parquet"  
+new_parquet_fname: "output_metadata_v8.parquet"  
+azure_filename: "ftw_ood_wild_s2_patches_v8"  

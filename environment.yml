@@ -1,0 +1,38 @@
+name: ood
+channels:
+  - conda-forge
+dependencies:
+  - gdal
+  - python<3.12
+  - numpy<2.0
+  - pip
+  - pip:
+    - adlfs
+    - azure-storage-blob
+    - dask_geopandas
+    - deltalake
+    - geopandas
+    - ipykernel
+    - jupyter
+    - mercantile>=1.2
+    - planetary_computer
+    - pyarrow
+    - tensorboard
+    - protobuf
+    - torch<2.1
+    - torch-tb-profiler
+    - git+https://github.com/microsoft/torchgeo.git
+    - utm
+    - hydra-core
+    - kornia
+    - lightning
+    - stackstac
+    - rioxarray
+    - torchinfo
+    - seaborn
+    - scikit-learn
+    - ruamel.yaml
+    - openpyxl
+    - folium
+    - imblearn
+    - optuna
