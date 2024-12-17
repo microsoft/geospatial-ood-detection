@@ -1,12 +1,13 @@
-base_dir: "./"
+base_dir: "BASE DIR"  
 paths:  
-  model_checkpoint: "exp_data/FTW-25-Experiment-1-1-4_model.ckpt"  
+  model_checkpoint: "FTW-25-Experiment-1-1-4_model.ckpt"  
   root_folder_torchgeo: "FTW_TorchGeo"  
   path_wild_patches: "FTW_WILD_PATCHES_all/ftw_ood_wild_s2_patches_all"  
+  classifier_pickle: "ood_classifier.pkl"
 dataloader:  
-  batch_size: 8  
-  num_workers: 0  
-  sample_N_from_each_country: 20  
+  batch_size: 2
+  num_workers: 64
+  sample_N_from_each_country: 50  
   all_countries:   
     - belgium  
     - cambodia  
@@ -55,5 +56,5 @@ container_name: "CONTAINER"
 sas_key: ""  
 num_pairs: 10000  
 s2_parquet_fn: "ftw_ood/s2l2a_5_17_2023_clouds_lt_20_date_gt_2021-01-01_land_masked.parquet"  
-new_parquet_fname: "output_metadata_v8.parquet"  
-azure_filename: "ftw_ood_wild_s2_patches_v8"  
+new_parquet_fname: "output_metadata.parquet"  
+azure_filename: "ftw_ood_wild_s2_patches"  

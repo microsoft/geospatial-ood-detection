@@ -107,7 +107,6 @@ class CustomSemanticSegmentationTask(BaseTask):
 
         self.weights = weights
         super().__init__()
-        # super().__init__(ignore="weights")
         print(self.hparams)
 
     def configure_losses(self) -> None:
@@ -369,14 +368,11 @@ class CustomSemanticSegmentationTask(BaseTask):
         update_weights = True
 
         for index, layer_key in enumerate(pretrained_weights):
-            # TODO : generalizing the patch mapping
             encoder_key = prefix + layer_key
             layer_w = pretrained_weights[layer_key]
             if encoder_key in model_dict:
-                if index == 0:  # pacth first conv. layer weights
-                    # Extract pre-trained weights for the first convolutional layer
+                if index == 0:
                     pretrained_conv1_weights = layer_w
-                    # Retrieve the current conv1 weights
                     new_conv1_weights = model_dict[encoder_key]
                     new_conv1_weights[:, :3, :, :] = pretrained_conv1_weights[
                         :, :3, :, :

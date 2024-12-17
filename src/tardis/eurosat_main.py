@@ -8,13 +8,12 @@ import os
 
 import hydra
 from lightning.pytorch import Trainer
-from lightning.pytorch.callbacks import (EarlyStopping, ModelCheckpoint,
-                                         TQDMProgressBar)
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, TQDMProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
 from omegaconf import DictConfig
 from torchgeo.trainers import ClassificationTask
 
-from .eurosat_datamodule import EuroSATSpatialDataModuleAug
+from eurosat_datamodule import EuroSATSpatialDataModuleAug
 
 
 @hydra.main(
@@ -39,7 +38,6 @@ def main(cfg: DictConfig):
         freeze_backbone=False,
     )
 
-    # Setup callbacks for model checkpointing and early stopping
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss", dirpath=default_root_dir, save_last=False
     )

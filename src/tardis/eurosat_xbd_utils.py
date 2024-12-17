@@ -4,19 +4,25 @@
 """A package containing utilities for xBD and EuroSAT datasets."""
 
 import gc
+import os
 import random
+import re
 import sys
 import time
 from datetime import datetime
 
+import kornia
+import kornia.augmentation as K
 import matplotlib.pyplot as plt
 import numpy as np
 import optuna
 import pandas as pd
 import scipy.stats as stats
+import torch
+import tqdm
 from matplotlib.colors import ListedColormap
 from omegaconf import OmegaConf
-from scipy.stats import entropy
+from scipy.stats import entropy, ttest_ind_from_stats
 from sklearn.cluster import KMeans
 from sklearn.linear_model import LogisticRegression
 from sklearn.manifold import TSNE
@@ -24,13 +30,11 @@ from sklearn.metrics import accuracy_score, auc, roc_curve
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.utils.class_weight import compute_sample_weight
-from torchgeo.trainers import ClassificationTask
+from torchgeo.trainers import ClassificationTask, SemanticSegmentationTask
 
-sys.path.append("..")
-from .eurosat_datamodule import (EuroSATClassHoldOutAug,
-                                 EuroSATSpatialDataModuleAug)
-from .utils import create_feature_matrix_and_labels
+from .utils import create_feature_matrix_and_labels, load_exp_ev_metrics_json
+from .xbd_datamodule import XView2DataModuleOOD
+from .eurosat_datamodule import EuroSATClassHoldOutAug, EuroSATSpatialDataModuleAug
 
 
 def set_task_model_cfg_dict(config_path, ckpt_path, device, mode):
@@ -47,9 +51,8 @@ def set_task_model_cfg_dict(config_path, ckpt_path, device, mode):
             - train_dataloader (DataLoader): DataLoader for the training dataset.
             - val_dataloader (DataLoader): DataLoader for the validation dataset.
             - test_dataloader (DataLoader): DataLoader for the test dataset.
-            - cfg (OmegaConf): The loaded configuration.
+            - cfg (OmegaConf): The loaded configure
     """
-
     cfg = OmegaConf.load(config_path)
     datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -60,6 +63,7 @@ def set_task_model_cfg_dict(config_path, ckpt_path, device, mode):
     print("Model and Task are loaded.")
 
     if mode == "holdout":
+        print("download", cfg.data.download)
         datamodule = EuroSATClassHoldOutAug(
             class_name=cfg.data.class_name,
             root=cfg.data.root,
@@ -68,6 +72,7 @@ def set_task_model_cfg_dict(config_path, ckpt_path, device, mode):
             exclude_class=cfg.data.class_name,
             download=cfg.data.download,
             checksum=cfg.data.checksum,
+            drop_last=cfg.data.drop_last,
         )
     elif mode == "spatialsplit":
         datamodule = EuroSATSpatialDataModuleAug(
@@ -75,6 +80,8 @@ def set_task_model_cfg_dict(config_path, ckpt_path, device, mode):
             batch_size=cfg.data.batch_size,
             num_workers=cfg.data.num_workers,
             sampler=None,
+            download=cfg.data.download,
+            checksum=cfg.data.checksum,
         )
 
     datamodule.setup(stage="fit")
@@ -125,7 +132,7 @@ def get_X_y_arrays(
     """
 
     (
-        task,
+        _,
         model,
         datamodule,
         train_dataloader,
@@ -141,7 +148,7 @@ def get_X_y_arrays(
         len(test_dataloader),
     )
 
-    X, y, test_property_lengths, train_images, test_images = (
+    X, y, _, train_images, test_images = (
         create_feature_matrix_and_labels(
             model=model,
             dm=datamodule,
@@ -171,9 +178,8 @@ def get_X_y_arrays(
 
 
 def run_g_experiment(
-    X, y, split_seed, test_size, n_estimators, fixed_classifier_seed, clf=None
+    X, y, split_seed, test_size, _, fixed_classifier_seed, clf=None
 ):
-    # Split the data into training and validation sets
     X_train_cluster, X_val_baseline, y_train_cluster, y_val_baseline = train_test_split(
         X, y, test_size=test_size, random_state=split_seed
     )
@@ -198,7 +204,7 @@ def run_g_experiment(
         else model.decision_function(X_val_baseline)
     )
 
-    fpr, tpr, thresholds = roc_curve(y_val_baseline, y_proba)
+    fpr, tpr, _ = roc_curve(y_val_baseline, y_proba)
     baseline_roc_auc = auc(fpr, tpr)
 
     # Compute FPR95%
@@ -232,6 +238,23 @@ def run_multiple_experiments_g(
     random_seed=False,
     clf=None,
 ):
+    """
+    Run multiple baseline experiments for the g-classifier.
+
+    Args:
+        X (array-like): Feature matrix.
+        y (array-like): Labels for training and validation.
+        test_size (float): Proportion of data used for testing.
+        n_estimators (int): Number of estimators for the classifier.
+        N (int): Number of experiment iterations.
+        fixed_classifier_seed (int): Random seed for the classifier.
+        random_seed (bool): If True, uses random seed for each iteration.
+        clf (object): Optional classifier instance.
+
+    Returns:
+        pd.DataFrame: DataFrame containing results for all iterations.
+    """
+
     results_list = []
     for i in range(N):
         if random_seed:
@@ -254,46 +277,62 @@ def run_multiple_experiments_g(
         results["iteration"] = i + 1
         results_list.append(results)
 
-    # Convert the list of results into a DataFrame
     results_df = pd.DataFrame(results_list)
     return results_df
 
 
 def calculate_mean_std(data):
+    """
+    Calculate the mean and standard deviation for a set of values.
+
+    Args:
+        data (array-like): Input data.
+
+    Returns:
+        tuple: Mean and standard deviation of the data.
+    """
     mean = np.mean(data)
     std = np.std(data, ddof=1)  # Standard deviation
     return mean, std
 
 
-# Function to calculate the confidence interval
-def confidence_interval(data, confidence=0.95):
-    n = len(data)
-    mean = np.mean(data)
-    stderr = stats.sem(data)  # Standard error of the mean
-    h = stderr * stats.t.ppf((1 + confidence) / 2.0, n - 1)  # Margin of error
-    return mean, h  # Returning mean and margin of error
-
-
-# Calculate confidence intervals for the specified columns
-def calculate_confidence_intervals(results_df, columns_of_interest):
+def calculate_confidence_intervals(results_df, columns_of_interest, confidence=0.95):
     """
-    Calculate confidence intervals for the specified columns in the results DataFrame.
+    Calculate confidence intervals for specified columns in a DataFrame.
 
     Args:
         results_df (pd.DataFrame): DataFrame containing the results.
         columns_of_interest (list): List of column names for which to calculate confidence intervals.
+        confidence (float): Confidence level (default is 0.95).
 
     Returns:
         dict: A dictionary with column names as keys and tuples of (mean, margin_of_error) as values.
     """
     confidence_intervals = {}
     for column in columns_of_interest:
-        mean, margin_of_error = confidence_interval(results_df[column])
+        data = results_df[column]
+        n = len(data)
+        mean = np.mean(data)
+        stderr = stats.sem(data)  # Standard error of the mean
+        margin_of_error = stderr * stats.t.ppf(
+            (1 + confidence) / 2.0, n - 1
+        )  # Margin of error
         confidence_intervals[column] = (mean, margin_of_error)
     return confidence_intervals
 
 
 def calculate_average_entropy(cluster_labels, true_labels, num_clusters):
+    """
+    Calculate the average entropy of clusters for ID and OOD samples.
+
+    Args:
+        cluster_labels (array-like): Cluster assignments for samples.
+        true_labels (array-like): Ground truth labels for samples.
+        num_clusters (int): Number of clusters.
+
+    Returns:
+        float: Average entropy value for all clusters.
+    """
     cluster_entropy = []
     for cluster_idx in range(num_clusters):
         # True labels for samples in the current cluster
@@ -309,7 +348,6 @@ def calculate_average_entropy(cluster_labels, true_labels, num_clusters):
     return np.mean(cluster_entropy) if cluster_entropy else 0
 
 
-# Define the objective function to optimize
 def objective(
     trial,
     X,
@@ -319,10 +357,27 @@ def objective(
     max_cluster_ratio,
     min_fraction,
     max_fraction,
-    n_estimators,
     fixed_seed,
     clf=None,
 ):
+    """
+    Objective function for optimizing clustering parameters using Optuna.
+
+    Args:
+        trial (optuna.trial.Trial): Current Optuna trial object.
+        X (array-like): Feature matrix.
+        y (array-like): Labels for clustering.
+        test_size (float): Proportion of data for testing.
+        min_cluster (int): Minimum number of clusters.
+        max_cluster_ratio (float): Maximum cluster ratio relative to training size.
+        min_fraction (float): Minimum ID fraction threshold.
+        max_fraction (float): Maximum ID fraction threshold.
+        fixed_seed (int): Random seed for reproducibility.
+        clf (object): Optional classifier instance.
+
+    Returns:
+        float: Composite metric combining entropy and ID/OOD proportions.
+    """
     # Split the data into training and validation sets
     X_train_cluster, X_val_baseline, y_train_cluster, y_val_baseline = train_test_split(
         X, y, test_size=test_size, random_state=fixed_seed
@@ -330,9 +385,6 @@ def objective(
 
     min_cluster = min_cluster
     max_cluster = int(max_cluster_ratio * len(X_train_cluster))
-
-    min_fraction = min_fraction
-    max_fraction = max_fraction
 
     # Suggest values for the hyperparameters within the constrained range for k and M
     k = trial.suggest_int("k", min_cluster, max_cluster)
@@ -357,7 +409,7 @@ def objective(
 
     # Check for unique labels in y_clusters
     if len(np.unique(y_clusters)) < 2:
-        # Return a large penalty to indicate failure or invalid trial
+        # Return inf to indicate invalid trial
         return float("inf")
 
     correct_id = np.sum((y_train_cluster == 0) & (y_train_cluster == 0))
@@ -369,7 +421,6 @@ def objective(
     )
 
     if clf is None:
-        # Fit the classifier
         clf = LogisticRegression(
             class_weight="balanced", max_iter=500, random_state=fixed_seed
         )
@@ -380,13 +431,12 @@ def objective(
     y_pred = model.predict(X_val_baseline)
     accuracy = accuracy_score(y_val_baseline, y_pred)
 
-    # Try-except block to handle potential errors
     try:
         y_proba = model.predict_proba(X_val_baseline)[:, 1]
     except IndexError:
         return float(
             "inf"
-        )  # Handle the case where predict_proba has only one class (likely to be 0)
+            )  # Handle case where only one class is predicted
 
     fpr, tpr, _ = roc_curve(y_val_baseline, y_proba)
     roc_auc = auc(fpr, tpr)
@@ -403,9 +453,7 @@ def objective(
         "accuracy": accuracy,
         "roc_auc": roc_auc,
         "fpr95": fpr95,
-        "actual_ood_samples": np.sum(
-            y_train_cluster == 1
-        ),  # Ensure this is defined correctly
+        "actual_ood_samples": np.sum(y_train_cluster == 1),
         "surrogate_ood": np.sum(y_clusters == 1),
         "correct_ood": np.sum((y_clusters == 1) & (y_train_cluster == 1)),
         "incorrect_ood": np.sum((y_clusters == 1) & (y_train_cluster == 0)),
@@ -437,6 +485,25 @@ def run_optuna_study(
     n_estimators,
     fixed_seed,
 ):
+    """
+    Run an Optuna study to optimize clustering parameters.
+
+    Args:
+        X (array-like): Feature matrix.
+        y (array-like): Labels for clustering.
+        n_optuna_trials (int): Number of Optuna trials to run.
+        test_size (float): Proportion of data for testing.
+        min_cluster (int): Minimum number of clusters.
+        max_cluster_ratio (float): Maximum cluster ratio relative to training size.
+        min_fraction (float): Minimum ID fraction threshold.
+        max_fraction (float): Maximum ID fraction threshold.
+        n_estimators (int): Number of estimators for the classifier.
+        fixed_seed (int): Random seed for reproducibility.
+
+    Returns:
+        pd.DataFrame: DataFrame with results from the best Optuna trial.
+    """
+
     results = []
 
     study = optuna.create_study(
@@ -538,7 +605,6 @@ def run_g_hat_experiment(
     fpr95_idx = np.where(tpr >= 0.95)[0][0] if np.any(tpr >= 0.95) else -1
     fpr95 = fpr[fpr95_idx] if fpr95_idx != -1 else np.nan
 
-    # Return metrics and data
     metrics = {
         "iteration": iteration_num,
         "accuracy": accuracy,
@@ -571,7 +637,7 @@ def run_multiple_experiments_g_hat(X, y, test_size, k, M, N, fixed_seed=31, clf=
         print(f"random_state for split_seed in iteration {i + 1}:", split_seed)
 
         # Call the single experiment function
-        result, X_train_cluster, y_train_cluster, y_clusters = run_g_hat_experiment(
+        result, *_ = run_g_hat_experiment(
             X, y, test_size, k, M, split_seed, fixed_seed, i + 1, clf
         )
         results_list.append(result)
@@ -580,34 +646,24 @@ def run_multiple_experiments_g_hat(X, y, test_size, k, M, N, fixed_seed=31, clf=
 
 def benchmark_classifiers(X, y, test_size, k, M, classifiers, fixed_seed):
     """
-    Benchmarks different classifiers on the given dataset, measuring performance and walltime.
+    Benchmark the performance and walltime of multiple classifiers.
 
-    Parameters:
-    X : array-like
-        The feature set.
-    y : array-like
-        The labels.
-    test_size : float
-        Proportion of the dataset to include in the test split.
-    k : int
-        Number of clusters for KMeans.
-    M : float
-        Threshold for marking a cluster as OOD.
-    classifiers : dict
-        Dictionary of classifiers to benchmark.
+    Args:
+        X (array-like): Feature matrix.
+        y (array-like): Labels for clustering.
+        test_size (float): Proportion of data for testing.
+        k (int): Number of clusters.
+        M (float): Threshold for identifying OOD clusters.
+        classifiers (dict): Dictionary of classifier instances to benchmark.
+        fixed_seed (int): Random seed for reproducibility.
 
     Returns:
-    results_df : pandas.DataFrame
-        A DataFrame containing the benchmark results.
+        pd.DataFrame: DataFrame containing benchmark results for each classifier.
     """
 
-    # Data split
     X_train_cluster, X_val_baseline, y_train_cluster, y_val_baseline = train_test_split(
         X, y, test_size=test_size, random_state=fixed_seed
     )
-
-    # Compute sample weights for models that don't have `class_weight` parameter
-    compute_sample_weight("balanced", y_train_cluster)
 
     # Benchmark KMeans clustering walltime
     start_time_cluster = time.time()
@@ -633,24 +689,20 @@ def benchmark_classifiers(X, y, test_size, k, M, classifiers, fixed_seed):
         if cluster_idx not in ood_cluster_indices:
             y_clusters[cluster_labels == cluster_idx] = 0
 
-    # Store results
     benchmark_results = []
 
     # Loop through classifiers and measure walltimes for training and prediction
     for clf_name, clf in classifiers.items():
         model = make_pipeline(StandardScaler(), clf)
 
-        # Benchmark classifier training walltime
         start_time_clsf = time.time()
 
-        # Fit model (train)
         model.fit(X_train_cluster, y_clusters)
 
         end_time_clsf = time.time()
         classifier_time = end_time_clsf - start_time_clsf
 
         start_time_clsf_pred = time.time()
-        # Make predictions
         y_pred = model.predict(X_val_baseline)
 
         end_time_clsf_pred = time.time()
@@ -658,7 +710,6 @@ def benchmark_classifiers(X, y, test_size, k, M, classifiers, fixed_seed):
 
         accuracy = accuracy_score(y_val_baseline, y_pred)
 
-        # Predict probabilities for AUROC and FPR95
         try:
             y_proba = model.predict_proba(X_val_baseline)[:, 1]
         except IndexError:
@@ -672,7 +723,6 @@ def benchmark_classifiers(X, y, test_size, k, M, classifiers, fixed_seed):
         fpr95_idx = np.where(tpr >= 0.95)[0][0] if np.any(tpr >= 0.95) else -1
         fpr95 = fpr[fpr95_idx] if fpr95_idx != -1 else np.nan
 
-        # Calculate time per sample
         classifier_time_per_sample = classifier_time / len(
             X_train_cluster
         )  # Fit time per sample
@@ -680,7 +730,6 @@ def benchmark_classifiers(X, y, test_size, k, M, classifiers, fixed_seed):
             X_val_baseline
         )  # Prediction time per sample
 
-        # Append the results
         benchmark_results.append(
             {
                 "Classifier": clf_name,
@@ -697,60 +746,40 @@ def benchmark_classifiers(X, y, test_size, k, M, classifiers, fixed_seed):
             }
         )
 
-    # Convert the results into a DataFrame
     results_df = pd.DataFrame(benchmark_results)
     return results_df
 
 
 def benchmark_clustering_methods(X, y, test_size, k, M, clustering_methods, classifier):
     """
-    Benchmarks different clustering methods followed by a classifier on the given dataset.
+    Benchmark different clustering methods combined with a classifier.
 
-    Parameters:
-    X : array-like
-        The feature set.
-    y : array-like
-        The labels.
-    test_size : float
-        Proportion of the dataset to include in the test split.
-    k : int
-        Number of clusters for KMeans (if used).
-    M : float
-        Threshold for marking a cluster as OOD.
-    clustering_methods : dict
-        Dictionary of clustering methods to benchmark.
-    classifier : estimator
-        A classifier model to benchmark.
+    Args:
+        X (array-like): Feature matrix.
+        y (array-like): Labels for clustering.
+        test_size (float): Proportion of data for testing.
+        k (int): Number of clusters.
+        M (float): Threshold for identifying OOD clusters.
+        clustering_methods (dict): Dictionary of clustering methods.
+        classifier (object): Classifier instance to evaluate.
 
     Returns:
-    results_df : pandas.DataFrame
-        A DataFrame containing the benchmark results for each clustering method.
+        pd.DataFrame: DataFrame containing benchmark results for clustering methods.
     """
 
-    # Data split
     X_train_cluster, X_val_baseline, y_train_cluster, y_val_baseline = train_test_split(
         X, y, test_size=test_size, random_state=42
     )
 
-    # Log the number of samples
     n_samples = len(X_train_cluster)
 
-    # Compute sample weights for models that don't have `class_weight` parameter
-    compute_sample_weight("balanced", y_train_cluster)
-
-    # Store results
     benchmark_results = []
 
-    # Loop through clustering methods and log walltimes
     for cluster_name, clustering in clustering_methods.items():
         # Log clustering walltime
         start_time = time.time()
 
-        # Perform clustering
-        if cluster_name.startswith("KMeans"):
-            cluster_labels = clustering.fit_predict(X_train_cluster)
-        else:  # For DBSCAN
-            cluster_labels = clustering.fit_predict(X_train_cluster)
+        cluster_labels = clustering.fit_predict(X_train_cluster)
 
         end_time = time.time()
         clustering_time = end_time - start_time
@@ -802,7 +831,6 @@ def benchmark_clustering_methods(X, y, test_size, k, M, clustering_methods, clas
         fpr95_idx = np.where(tpr >= 0.95)[0][0] if np.any(tpr >= 0.95) else -1
         fpr95 = fpr[fpr95_idx] if fpr95_idx != -1 else np.nan
 
-        # Append the results
         benchmark_results.append(
             {
                 "Clustering": cluster_name,
@@ -815,7 +843,6 @@ def benchmark_clustering_methods(X, y, test_size, k, M, clustering_methods, clas
             }
         )
 
-    # Convert the results into a DataFrame
     results_df = pd.DataFrame(benchmark_results)
     return results_df
 
@@ -833,11 +860,28 @@ def benchmark_kmeans_with_varying_k_condidence_g_hat(
     fname=False,
 ):
     """
-    Benchmarks KMeans clustering with varying values of k, followed by a classifier,
-    computes confidence intervals over N runs, and plots results.
-    """
+    Benchmark KMeans clustering with varying values of k, followed by a classifier, and compute confidence intervals.
 
-    # Split the data into clustering base and fixed validation set
+    This function benchmarks the KMeans clustering algorithm by varying the number of clusters `k` as powers of 2,
+    fits a classifier to the clustering output, and evaluates performance metrics such as accuracy, FPR95, and ROC AUC.
+    It also calculates confidence intervals over multiple runs and plots the results.
+
+    Args:
+        X (array-like): Input feature matrix.
+        y (array-like): Input labels (ground truth).
+        M (float): Threshold for identifying OOD clusters based on the ID sample fraction.
+        test_size (float): Proportion of data to use as the validation/test set (default is 0.2).
+        n_runs (int): Number of runs for each value of k to compute confidence intervals (default is 10).
+        confidence_level (float): Confidence level for confidence intervals (default is 0.95).
+        confidence_intervals_g (dict, optional): Baseline confidence intervals to compare against.
+        clf (object, optional): Classifier instance to use. Defaults to `LogisticRegression` if None.
+        save_plot (bool): If True, saves the generated plot to disk (default is False).
+        fname (str, optional): Filename for saving the plot if `save_plot` is True.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the mean, confidence intervals, and metrics (Accuracy, FPR95, ROC AUC)
+                    for each value of k and its fraction relative to the training set size.
+    """
     X_cluster_base, X_val_baseline, y_cluster_base, y_val_baseline = train_test_split(
         X, y, test_size=test_size, random_state=42, shuffle=True
     )
@@ -935,12 +979,10 @@ def benchmark_kmeans_with_varying_k_condidence_g_hat(
             except IndexError:
                 fpr95 = np.nan
 
-            # Append metrics to the lists
             accuracy_list.append(accuracy)
             fpr95_list.append(fpr95)
             roc_auc_list.append(roc_auc)
 
-        # Calculate mean and confidence intervals for each metric
         metrics = {
             "accuracy": accuracy_list,
             "fpr95": fpr95_list,
@@ -1041,14 +1083,12 @@ def benchmark_kmeans_with_varying_k_condidence_g_hat(
             label="Baseline AUROC",
         )
 
-    # Customizing the plot
     plt.xlabel("k / len(X_train_cluster) (Fraction of Training Set)")
     plt.ylabel("Metrics")
     plt.title("Metrics vs. Fraction of Clusters (k / len(X_train_cluster))")
     plt.legend()
     plt.grid(True)
 
-    # Save the plot if asked
     if save_plot is True and fname is not None:
         plt.savefig(
             f"./benchmark/{fname}_benchmark_kmeans_with_varying_k_confidence_g_hat.svg"
@@ -1063,17 +1103,17 @@ def plot_tsne_with_label_changes(
     X_train_cluster, y_train_cluster, y_clusters, class_name, save_plot=False
 ):
     """
-    Generates and saves a t-SNE plot with original and clustered labels, and visualizes label changes.
+    Generate a t-SNE plot to visualize changes between original and clustered labels.
 
-    Parameters:
-    X_train_cluster : array-like
-        The feature set used for training the clustering model.
-    y_train_cluster : array-like
-        The original labels (ID/OOD).
-    y_clusters : array-like
-        The new clustered labels (reassigned after clustering).
-    class_name : str
-        The class name to include in the plot title and save file.
+    Args:
+        X_train_cluster (array-like): Feature matrix used for clustering.
+        y_train_cluster (array-like): Original labels (ID/OOD).
+        y_clusters (array-like): Clustered labels after reassignment.
+        class_name (str): Class name used in the plot title and save file.
+        save_plot (bool): Whether to save the plot to disk.
+
+    Returns:
+        None
     """
 
     # Perform t-SNE to reduce dimensionality to 2D for visualization
@@ -1132,7 +1172,6 @@ def plot_tsne_with_label_changes(
         label="Change Type (0 = No Change, 1 = 0 to 1, 2 = 1 to 0)",
     )
 
-    # Save the plot if asked
     save_plot = True
     if save_plot:
         plt.savefig(f"./benchmark/{class_name}_tsne_clustering.svg")
@@ -1142,17 +1181,16 @@ def plot_tsne_with_label_changes(
 
 def plot_downsample_benchmark(data, class_name, save_dir="benchmark"):
     """
-    Plots a comparison of Accuracy, AUROC, and FPR95 for different downsampling methods.
+    Plot Accuracy, AUROC, and FPR95 for different downsampling methods.
 
-    Parameters:
-    - data: Dictionary containing the benchmark data.
-    - class_name: Name of the class (used in the plot title and file name).
-    - save_dir: Directory where the plot image will be saved (default is "benchmark").
+    Args:
+        data (dict): Dictionary containing benchmark results for downsampling methods.
+        class_name (str): Name of the class used in the plot title and file name.
+        save_dir (str): Directory to save the plot image.
 
     Returns:
-    - None
+        None
     """
-
     # Extract labels and values
     labels = list(data.keys())
     accuracy = [data[k]["baseline_accuracy"] for k in labels]
@@ -1163,31 +1201,26 @@ def plot_downsample_benchmark(data, class_name, save_dir="benchmark"):
     x = np.arange(len(labels))
     width = 0.2
 
-    # Create the plot
     fig, ax = plt.subplots(figsize=(10, 6))
     colors = ["#0072B2", "#E69F00", "#D55E00"]
 
     # Plot bars
-    bars1 = ax.bar(x - width, accuracy, width, label="Accuracy", color=colors[0])
-    bars2 = ax.bar(x, auroc, width, label="AUROC", color=colors[1])
-    bars3 = ax.bar(x + width, fpr95, width, label="FPR95", color=colors[2])
+    _ = ax.bar(x - width, accuracy, width, label="Accuracy", color=colors[0])
+    _ = ax.bar(x, auroc, width, label="AUROC", color=colors[1])
+    _ = ax.bar(x + width, fpr95, width, label="FPR95", color=colors[2])
 
-    # Set plot labels and title
     ax.set_xlabel("Downsampling Methods")
     ax.set_ylabel("Scores")
     ax.set_title(f"Comparison of Accuracy, AUROC, and FPR95 for {class_name}")
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
 
-    # Customize grid and spines
     ax.grid(True, axis="y", linestyle="--", alpha=0.7)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-    # Add legend
     ax.legend()
 
-    # Adjust layout and save the figure
     plt.tight_layout()
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -1196,49 +1229,41 @@ def plot_downsample_benchmark(data, class_name, save_dir="benchmark"):
     plt.show()
 
 
-import re
-
-
 def plot_layer_benchmark(data, all_layer_names, class_name, save_dir="benchmark"):
     """
-    Plots a comparison of Accuracy, AUROC, and FPR95 for different layers.
+    Plot a comparison of Accuracy, AUROC, and FPR95 metrics for different layers in the model.
 
-    Parameters:
-    - data: Dictionary containing the benchmark data.
-    - all_layer_names: List of all layer names in the order they should be sorted.
-    - class_name: Name of the class (used in the plot title and file name).
-    - save_dir: Directory where the plot image will be saved (default is "benchmark").
+    Args:
+        data (dict): Dictionary containing performance metrics for each layer.
+        all_layer_names (list): List of all layer names to ensure sorted order.
+        class_name (str): Name of the class used in the plot title and file name.
+        save_dir (str): Directory to save the plot image.
 
     Returns:
-    - None
+        None
     """
-
-    # Extract the layer names from each key
     layers = [re.search(r"\['(.*?)'\]", k).group(1) for k in data.keys()]
     accuracy = [data[k]["baseline_accuracy"] for k in data.keys()]
     roc_auc = [data[k]["baseline_roc_auc"] for k in data.keys()]
     fpr95 = [data[k]["baseline_fpr95"] for k in data.keys()]
 
-    # Set up the bar positions and width
     x = np.arange(len(layers))
     width = 0.25
 
-    # Create the plot
     fig, ax = plt.subplots(figsize=(10, 6))
     colors = ["#0072B2", "#E69F00", "#D55E00"]
 
-    # Plot bars
-    bars1 = ax.bar(x - width, accuracy, width, label="Accuracy", color=colors[0])
-    bars2 = ax.bar(x, roc_auc, width, label="AUROC", color=colors[1])
-    bars3 = ax.bar(x + width, fpr95, width, label="FPR95", color=colors[2])
+    _ = ax.bar(x - width, accuracy, width, label="Accuracy", color=colors[0])
+    _ = ax.bar(x, roc_auc, width, label="AUROC", color=colors[1])
+    _ = ax.bar(x + width, fpr95, width, label="FPR95", color=colors[2])
 
     # Find the index of each layer in all_layer_names and sort layers based on these indices
     layer_indices = [all_layer_names.index(layer) for layer in layers]
     sorted_layers_with_indices = sorted(zip(layers, layer_indices), key=lambda x: x[1])
 
     # Extract the sorted layers and their indices
-    sorted_layers = [layer for layer, idx in sorted_layers_with_indices]
-    sorted_indices = [idx for layer, idx in sorted_layers_with_indices]
+    sorted_layers = [layer for layer, _ in sorted_layers_with_indices]
+    sorted_indices = [idx for _, idx in sorted_layers_with_indices]
 
     # Create the x-axis labels with both layer name and index
     layer_labels_with_index = [
@@ -1253,7 +1278,6 @@ def plot_layer_benchmark(data, all_layer_names, class_name, save_dir="benchmark"
     ax.set_xticks(x)
     ax.set_xticklabels(layer_labels_with_index, rotation=45, ha="right")
 
-    # Customize grid and spines
     ax.grid(True, axis="y", linestyle="--", alpha=0.7)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -1268,44 +1292,23 @@ def plot_layer_benchmark(data, all_layer_names, class_name, save_dir="benchmark"
     plt.show()
 
 
-import numpy as np
-from scipy.stats import ttest_ind_from_stats
-
-
-def calculate_mean_std(values):
-    """
-    Calculate the mean and standard deviation of a list of values.
-
-    Parameters:
-    - values: List of numerical values.
-
-    Returns:
-    - A tuple containing the mean and standard deviation.
-    """
-    mean = np.mean(values)
-    std = np.std(values, ddof=1)  # Use ddof=1 for sample standard deviation
-    return mean, std
-
-
 def perform_benchmark_analysis(g_benchmark, g_hat_benchmark, n_samples=10):
     """
-    Perform benchmark analysis and t-tests on baseline and g_hat metrics.
+    Perform statistical analysis (mean, standard deviation, and t-tests) on baseline and g_hat metrics.
 
-    Parameters:
-    - g_benchmark: Dictionary containing baseline benchmark metrics.
-    - g_hat_benchmark: List of dictionaries containing g_hat benchmark metrics.
-    - n_samples: Number of samples (default is 10).
+    Args:
+        g_benchmark (dict): Dictionary containing baseline benchmark metrics.
+        g_hat_benchmark (list): List of dictionaries containing g_hat benchmark metrics.
+        n_samples (int): Number of samples used for the t-tests.
 
     Returns:
-    - A dictionary containing the results of the t-tests.
+        dict: Dictionary containing t-test results (t-statistic and p-value) for Accuracy, ROC AUC, and FPR95.
     """
 
-    # Extract baseline metrics
     baseline_acc = list(g_benchmark["baseline_accuracy"])
     baseline_roc_auc = list(g_benchmark["baseline_roc_auc"])
     baseline_fpr95 = list(g_benchmark["baseline_fpr95"])
 
-    # Extract g_hat benchmark metrics using list comprehensions
     g_hat_acc = [entry["accuracy"] for entry in g_hat_benchmark]
     g_hat_roc_auc = [entry["roc_auc"] for entry in g_hat_benchmark]
     g_hat_fpr95 = [entry["fpr95"] for entry in g_hat_benchmark]
@@ -1315,7 +1318,6 @@ def perform_benchmark_analysis(g_benchmark, g_hat_benchmark, n_samples=10):
     g_baseline_mean_std_roc_auc = calculate_mean_std(baseline_roc_auc)
     g_baseline_mean_std_fpr95 = calculate_mean_std(baseline_fpr95)
 
-    # Print baseline results
     print(
         f"Baseline Accuracy: Mean = {g_baseline_mean_std_accuracy[0]}, Std Dev = {g_baseline_mean_std_accuracy[1]}"
     )
@@ -1331,7 +1333,6 @@ def perform_benchmark_analysis(g_benchmark, g_hat_benchmark, n_samples=10):
     g_hat_mean_std_roc_auc = calculate_mean_std(g_hat_roc_auc)
     g_hat_mean_std_fpr95 = calculate_mean_std(g_hat_fpr95)
 
-    # Print g_hat results
     print(
         f"g_hat Accuracy: Mean = {g_hat_mean_std_accuracy[0]}, Std Dev = {g_hat_mean_std_accuracy[1]}"
     )
@@ -1342,10 +1343,8 @@ def perform_benchmark_analysis(g_benchmark, g_hat_benchmark, n_samples=10):
         f"g_hat FPR95: Mean = {g_hat_mean_std_fpr95[0]}, Std Dev = {g_hat_mean_std_fpr95[1]}"
     )
 
-    # Perform t-tests
     t_tests = {}
 
-    # Accuracy
     t_acc, p_acc = ttest_ind_from_stats(
         g_baseline_mean_std_accuracy[0],
         g_baseline_mean_std_accuracy[1],
@@ -1357,7 +1356,6 @@ def perform_benchmark_analysis(g_benchmark, g_hat_benchmark, n_samples=10):
     )
     t_tests["accuracy"] = (t_acc, p_acc)
 
-    # ROC AUC
     t_rocauc, p_rocauc = ttest_ind_from_stats(
         g_baseline_mean_std_roc_auc[0],
         g_baseline_mean_std_roc_auc[1],
@@ -1369,7 +1367,6 @@ def perform_benchmark_analysis(g_benchmark, g_hat_benchmark, n_samples=10):
     )
     t_tests["roc_auc"] = (t_rocauc, p_rocauc)
 
-    # FPR95
     t_fpr95, p_fpr95 = ttest_ind_from_stats(
         g_baseline_mean_std_fpr95[0],
         g_baseline_mean_std_fpr95[1],
@@ -1381,15 +1378,23 @@ def perform_benchmark_analysis(g_benchmark, g_hat_benchmark, n_samples=10):
     )
     t_tests["fpr95"] = (t_fpr95, p_fpr95)
 
-    # Print the results of the t-tests
     print(f"Accuracy: t = {t_acc}, p = {p_acc}")
     print(f"ROC AUC: t = {t_rocauc}, p = {p_rocauc}")
     print(f"FPR95: t = {t_fpr95}, p = {p_fpr95}")
-
     return t_tests
 
 
 def pick_random_layers(all_layer_names, n):
+    """
+    Select random convolutional layers from a list of all layer names.
+
+    Args:
+        all_layer_names (list): List of all layer names in the model.
+        n (int): Number of layers to select, including the first and last convolutional layers.
+
+    Returns:
+        list: List of selected layer names, including the first, last, and randomly sampled layers.
+    """
     conv_layers = [layer for layer in all_layer_names if "conv" in layer]
     first_conv = conv_layers[0]  # First conv layer
     last_conv = conv_layers[-1]  # Last conv layer
@@ -1398,10 +1403,20 @@ def pick_random_layers(all_layer_names, n):
     selected_layers = [first_conv] + random_layers + [last_conv]
     return selected_layers
 
+def get_model_config(config_path, base_dir, device):
+    """
+    Load the model configuration and checkpoint for a segmentation task.
 
-def get_model_config(config_path, device):
+    Args:
+        config_path (str): Path to the configuration file.
+        base_dir (str): Directory containing experiment results and best model path.
+        device (str): Device to load the model on ("cpu" or "cuda").
+
+    Returns:
+        tuple: The loaded model (torch.nn.Module) and the configuration (OmegaConf).
+    """
     cfg = OmegaConf.load(config_path)
-    exp_results_best_path = load_exp_ev_metrics_json(cfg.exp_name)
+    exp_results_best_path = load_exp_ev_metrics_json(cfg.exp_name, base_dir)
     task = SemanticSegmentationTask.load_from_checkpoint(
         exp_results_best_path["best_model_path"]
     )
@@ -1415,10 +1430,28 @@ def get_model_config(config_path, device):
 
 
 def normalize(x):
+    """
+    Normalize input tensor values to the range [0, 1].
+
+    Args:
+        x (torch.Tensor): Input tensor.
+
+    Returns:
+        torch.Tensor: Normalized tensor.
+    """
     return x / 255.0
 
 
 def prepare_datamodule(cfg):
+    """
+    Prepare and initialize the XView2 data module with augmentations for training, validation, and testing.
+
+    Args:
+        cfg (OmegaConf): Configuration object containing paths, batch size, and augmentation parameters.
+
+    Returns:
+        tuple: Contains the initialized data module and its train, validation, and test DataLoaders.
+    """
     train_aug = K.AugmentationSequential(
         K.RandomRotation(degrees=90, p=0.5),
         K.RandomHorizontalFlip(p=0.5),
@@ -1431,7 +1464,7 @@ def prepare_datamodule(cfg):
             same_on_batch=False,
         ),
         data_keys=None,
-    ).to(device)
+    ).to(cfg.device)
 
     val_aug = K.AugmentationSequential(
         kornia.contrib.Lambda(normalize),
@@ -1442,7 +1475,7 @@ def prepare_datamodule(cfg):
             same_on_batch=False,
         ),
         data_keys=None,
-    ).to(device)
+    ).to(cfg.device)
 
     test_aug = K.AugmentationSequential(
         kornia.contrib.Lambda(normalize),
@@ -1453,7 +1486,7 @@ def prepare_datamodule(cfg):
             same_on_batch=False,
         ),
         data_keys=None,
-    ).to(device)
+    ).to(cfg.device)
 
     cfg.training.num_workers = 0
 
@@ -1471,9 +1504,8 @@ def prepare_datamodule(cfg):
     )
 
     datamodule.setup("fit")
-    datamodule.setup("test")
-
     datamodule_train = datamodule.train_dataloader()
+    datamodule.setup("test")
     datamodule_val = datamodule.val_dataloader()
     datamodule_test = datamodule.test_dataloader()
 
@@ -1481,6 +1513,18 @@ def prepare_datamodule(cfg):
 
 
 def evaluate_model(model, dm, dataloader, device):
+    """
+    Evaluate a model using a specified DataLoader and return predictions and labels.
+
+    Args:
+        model (torch.nn.Module): PyTorch model to evaluate.
+        dm (object): Data module containing augmentations.
+        dataloader (DataLoader): DataLoader for evaluation.
+        device (str): Device to run the model on.
+
+    Returns:
+        tuple: Ground truth labels and model predictions.
+    """
     model.eval()
     all_preds = []
     all_labels = []
@@ -1488,13 +1532,12 @@ def evaluate_model(model, dm, dataloader, device):
     with torch.no_grad():
         for batch in tqdm.tqdm(dataloader):
             aug_batch = dm.test_aug(batch)
-            labels = batch["mask"]
+            labels = aug_batch["mask"]
             aug_input = aug_batch["image"].to(device)
             logits = model(aug_input)
             all_preds.append(logits.cpu().numpy())
             all_labels.append(labels.cpu().numpy())
 
-    # Stack all predictions and labels into single numpy arrays
     all_preds = np.concatenate(all_preds, axis=0)
     all_labels = np.concatenate(all_labels, axis=0)
 

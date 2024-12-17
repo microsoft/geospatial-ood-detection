@@ -4,18 +4,22 @@
 *1. Sampling in-distribution (ID) and WILD samples.*  
 *2. Extracting internal activations from a pre-trained model \( f \) for both ID and WILD samples.*  
 *3. Clustering the combined feature space and labeling WILD samples as surrogate-ID or surrogate-OOD.*  
-*4. Fitting a binary classifier \( g \) on the labeled feature representations to distinguish between ID and OOD samples. The classifier \( g \), during deployment, flags out-of-distribution inputs.*
+*4. Fitting a binary classifier \( g \) on the labeled feature representations to distinguish between ID and OOD samples. The classifier, during deployment, flags out-of-distribution inputs.*
 
 ## Approach 
 TARDIS is a post-hoc OOD detection method designed for scalable geospatial deployments. It works by extracting internal activations from a pre-trained model, clustering the feature space, and assigning surrogate labels to WILD samples as either in-distribution (ID) or out-of-distribution (OOD). These surrogate labels are then used to train a binary classifier, enabling OOD detection during inference without compromising the model's primary task performance. The method is computationally efficient, making it practical for large-scale real-world deployments. For more details, check out our [paper](TBP).
 
 ## Overview
-Here is how to use it to detect OOD samples for a pretrained model:
+We first demonstrate our method on two datasets, _EuroSAT_ and _xBD_, under 17 experimental setups involving covariate and semantic shifts. This is implemented in `notebooks/eurosat_exp.ipynb` and `notebooks/xbd_exp.ipynb`, with the corresponding code in `src/tardis/`.  
+
+Then, we scale up the method for real-world deployment using a model trained on the [Fields of the World (FTW) dataset](https://github.com/fieldsoftheworld). This is demonstrated in `notebooks/tardis_FTW.ipynb`, with the corresponding code in `src/tardis_ftw/`.
+
+We assume access to a pre-trained model, its training set, and a collection of data with an unknown distribution (either ID or OOD). Here is how our method works:
 
 ```python
-from src.tardis_ftw.tardis_wrapper import OODModelWrapper
+from src.tardis_ftw.tardis_wrapper import TARDISWrapper
 
-ood_model = OODModelWrapper(
+ood_model = TARDISWrapper(
     base_model,              # The pre-trained model to investigate
     hook_layer_name,         # The layer name from which activations are extracted
     id_loader,               # DataLoader for in-distribution (ID) samples
@@ -41,13 +45,8 @@ f_preds, g_pred_probs = ood_model.f_g_prediction(inference_images)
 # `g_pred_probs`: Probability scores of the binary classifier, where **0** indicates higher ID characteristics and **1** indicates stronger OOD characteristics.
 ```
 
-## File Structure  
-We first demonstrate our method on two datasets, **EuroSAT** and **xBD**, under 17 experimental setups involving covariate and semantic shifts. This is implemented in `notebooks/eurosat_exp.ipynb` and `notebooks/xbd_exp.ipynb`, with the corresponding code in `src/tardis/`.  
-
-Then, we scale up the method for real-world deployment using a model trained on the [Fields of the World (FTW) dataset](https://github.com/fieldsoftheworld). This is demonstrated in `notebooks/tardis_FTW.ipynb`, with the corresponding code in `src/tardis_ftw/`.
-
-Below is the complete repository structure:
-
+<!-- Below is the complete repository structure: -->
+<!-- 
 ```
 configs/
 ├── eurosat/                  # Configuration files for experiments on the EuroSAT dataset.
@@ -77,9 +76,9 @@ src/
 │   ├── sample_s2_pc.py       # Script for sampling Sentinel-2 data from Planetary Computer.
 │   ├── tardis_wrapper.py     # Core wrapper implementing TARDIS workflow.
 │   ├── utils.py              # Additional helper functions for TARDIS.
-```
+``` -->
 
-## TARDIS in Action
+## OOD Detection Goes Global: TARDIS in Action
 ![TARDIS in Action](./figures/g_wild_map_v7.png)
 *The figure illustrates the geographical distribution of ID and WILD samples, where WILD samples are classified by the domain shift classifier as either ID or OOD. For randomly sampled Sentinel-2 input pairs, the model predictions and classifier outputs are shown. Notably, poor model predictions often correspond to high OOD detection performance, with a geographical pattern emerging: samples from arid biomes (e.g., the Sahara, Patagonia, Inner Australia) and polar regions (e.g., Icelandic glaciers, South Pole) are frequently flagged as OOD due to their ecological dissimilarity to mesic environments represented in the ID samples.*
 

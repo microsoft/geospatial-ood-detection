@@ -19,18 +19,19 @@ import rasterio
 import stackstac
 from shapely.geometry import Polygon
 from tqdm import tqdm
+
 from utils import load_config
 
 
 def is_land_tile(item):
     """
-    Determines if the given Sentinel-2 item is mostly land or sea.
+    Determines if a Sentinel-2 item is mostly land based on the SCL band.
 
     Parameters:
-    - item: A STAC item representing a Sentinel-2 tile.
+        item: A STAC item representing a Sentinel-2 tile.
 
     Returns:
-    - True if the tile is mostly land, False if it is mostly sea.
+        bool: True if the tile is mostly land, False otherwise.
     """
     # Download and analyze the SCL band to determine if the tile is on land or sea
     scl_asset = item.assets["SCL"]
@@ -52,12 +53,28 @@ def is_land_tile(item):
 
 
 def get_hemisphere(lat):
-    """Determine the hemisphere based on latitude."""
+    """
+    Determines the hemisphere based on latitude.
+
+    Parameters:
+        lat (float): Latitude value.
+
+    Returns:
+        str: 'Northern' for Northern Hemisphere, 'Southern' otherwise.
+    """
     return "Northern" if lat >= 0 else "Southern"
 
 
 def get_date_ranges(hemisphere):
-    """Returns planting and harvesting date ranges depending on the hemisphere."""
+    """
+    Returns planting and harvesting date ranges based on the hemisphere.
+
+    Parameters:
+        hemisphere (str): 'Northern' or 'Southern' hemisphere.
+
+    Returns:
+        tuple: Planting and harvesting date ranges as (start, end) tuples.
+    """
     if hemisphere == "Northern":
         planting_start, planting_end = "04-01", "06-30"
         harvesting_start, harvesting_end = "09-01", "11-30"
@@ -68,12 +85,31 @@ def get_date_ranges(hemisphere):
 
 
 def extract_tile_from_metadata(item):
-    """Extracts the MGRS tile identifier from the product metadata."""
-    return item.properties["s2:mgrs_tile"]  # Use metadata to get the tile ID
+    """
+    Extracts the MGRS tile identifier from product metadata.
+
+    Parameters:
+        item: A STAC item containing product metadata.
+
+    Returns:
+        str: The MGRS tile identifier.
+    """
+    return item.properties["s2:mgrs_tile"]
 
 
 def search_products_for_tile(catalog, tile_id, date_range, limit=10):
-    """Search for Sentinel-2 product IDs for a specific MGRS tile and date range."""
+    """
+    Searches for Sentinel-2 product IDs for a specific tile and date range.
+
+    Parameters:
+        catalog (object): A STAC catalog object.
+        tile_id (str): The MGRS tile identifier.
+        date_range (str): Date range in "YYYY-MM-DD/YYYY-MM-DD" format.
+        limit (int): Maximum number of products to retrieve.
+
+    Returns:
+        list: List of product IDs matching the search criteria.
+    """
     search = catalog.search(
         collections=["sentinel-2-l2a"],
         datetime=date_range,
@@ -81,16 +117,20 @@ def search_products_for_tile(catalog, tile_id, date_range, limit=10):
         limit=limit,
     )
 
-    # Fetch the items and convert them to a list
     items = search.item_collection()
     return [item.id for item in items] if items else []
 
 
 def is_valid_pair(prod_id1, prod_id2):
     """
-    Check if two product IDs form a valid pair based on the MGRS code.
-    A valid pair should have:
-    - The same MGRS code, which is the second to last segment of the product ID
+    Checks if two product IDs form a valid pair based on the MGRS code.
+
+    Parameters:
+        prod_id1 (str): The first product ID.
+        prod_id2 (str): The second product ID.
+
+    Returns:
+        bool: True if the pair has the same MGRS code, False otherwise.
     """
     mgrs_code1 = prod_id1.split("_")[-2]
     mgrs_code2 = prod_id2.split("_")[-2]
@@ -99,6 +139,17 @@ def is_valid_pair(prod_id1, prod_id2):
 
 
 def get_product_ids_for_planting_and_harvesting(prod_id1, catalog, max_retries=5):
+    """
+    Retrieves planting and harvesting product IDs for a given product ID.
+
+    Parameters:
+        prod_id1 (str): The product ID to base the search on.
+        catalog (object): A STAC catalog object.
+        max_retries (int): Maximum number of retries for product retrieval.
+
+    Returns:
+        tuple: Pair of product IDs (planting, harvesting).
+    """
     product_ids = []
     num_retries = 0
     item = None
@@ -180,15 +231,16 @@ def get_product_ids_for_planting_and_harvesting(prod_id1, catalog, max_retries=5
 
 def get_product_id_pairs(df, catalog, num_pairs, max_retries=5):
     """
-    Extracts product IDs from a DataFrame, and collects pairs of planting and harvesting IDs.
+    Extracts product ID pairs for planting and harvesting from a DataFrame.
 
-    Args:
+    Parameters:
         df (pd.DataFrame): DataFrame containing product information with 'id' column.
+        catalog (object): A STAC catalog object.
         num_pairs (int): Number of pairs to collect.
-        max_retries (int): Maximum number of retries for each product ID retrieval.
+        max_retries (int): Maximum number of retries per product.
 
     Returns:
-        List of tuples: Each tuple contains a pair of product IDs (planting, harvesting).
+        list: List of tuples containing planting and harvesting product IDs.
     """
     product_pairs = []
     num_error_hits = 0
@@ -221,7 +273,6 @@ def get_product_id_pairs(df, catalog, num_pairs, max_retries=5):
         except Exception as e:
             print(f"An error occurred while processing the product ID {prod_id}: {e}")
             num_error_hits += 1
-            # Optionally, you could limit how many errors can happen before stopping the loop
             if num_error_hits > max_retries:
                 print(
                     f"Exceeded maximum number of error retries ({max_retries}). Stopping."
@@ -243,12 +294,12 @@ def get_product_id_pairs(df, catalog, num_pairs, max_retries=5):
 
 def retrieve_metadata_and_save_parquet(product_ids, collection, parquet_output_file):
     """
-    Retrieve metadata for a list of product IDs and save it into a Parquet file.
+    Retrieves metadata for product IDs and saves it as a Parquet file.
 
     Parameters:
-    - product_ids: list of product IDs to retrieve metadata for
-    - collection: the STAC collection object
-    - parquet_output_file: file path to save the Parquet file
+        product_ids (list): List of product IDs to retrieve metadata for.
+        collection (object): STAC collection object.
+        parquet_output_file (str): Path to save the Parquet file.
     """
     # Initialize an empty list to store the metadata
     metadata_list = []
@@ -269,7 +320,7 @@ def retrieve_metadata_and_save_parquet(product_ids, collection, parquet_output_f
                 continue
 
             # Extract relevant metadata
-            geometry = item.geometry  # or extract the actual geometry as needed
+            geometry = item.geometry
             datetime = item.datetime
             eo_cloud_cover = item.properties["eo:cloud_cover"]
 
@@ -291,15 +342,15 @@ def retrieve_metadata_and_save_parquet(product_ids, collection, parquet_output_f
 
     initial_count = len(df)
 
-    # Step 1: Filter out rows with eo:cloud_cover > 10
+    # Filter out rows with eo:cloud_cover > 10
     filtered_df = df[df["eo:cloud_cover"] <= 10].copy()
 
-    # Step 2: Identify MGRS codes of rows that were removed
+    # Identify MGRS codes of rows that were removed
     removed_mgrs_codes = (
         df[df["eo:cloud_cover"] > 10]["id"].apply(lambda x: x.split("_")[4]).unique()
     )
 
-    # Step 3: Remove rows with the identified MGRS codes
+    # Remove rows with the identified MGRS codes
     final_df = filtered_df[
         ~filtered_df["id"].apply(lambda x: x.split("_")[4]).isin(removed_mgrs_codes)
     ]
@@ -322,7 +373,16 @@ def extract_patches_from_pair(
     df_filtered, collection, container_client, azure_filename
 ):
     """
-    Function to extract patches from planting and harvesting product IDs with matching x, y coordinates.
+    Extracts image patches for planting and harvesting products with matching coordinates.
+
+    Parameters:
+        df_filtered (pd.DataFrame): Filtered DataFrame of product pairs.
+        collection (object): A STAC collection object.
+        container_client (object): Azure container client for storage.
+        azure_filename (str): Azure blob storage directory name.
+
+    Returns:
+        list: List of results containing processed product details.
     """
     num_retries = 0
     num_error_hits = 0
@@ -452,6 +512,9 @@ def extract_patches_from_pair(
 
 
 def main():
+    """
+    Main function to orchestrate data retrieval, processing, and patch extraction.
+    """
     # Load configuration
     config = load_config()
 
