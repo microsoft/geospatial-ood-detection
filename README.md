@@ -84,11 +84,14 @@ src/
 
 ## Citation
 ```bibtex
-@article{ekim2024tardis,
-  title={Distribution Shifts at Scale: Out-of-distribution Detection in Earth Observation},
-  author={xxx},
-  journal={arXiv preprint arXiv:xx},
-  year={2024}
+@misc{ekim2024distributionshiftsscaleoutofdistribution,
+      title={Distribution Shifts at Scale: Out-of-distribution Detection in Earth Observation}, 
+      author={Burak Ekim and Girmaw Abebe Tadesse and Caleb Robinson and Gilles Hacheme and Michael Schmitt and Rahul Dodhia and Juan M. Lavista Ferres},
+      year={2024},
+      eprint={2412.13394},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2412.13394}, 
 }
 ```
 
