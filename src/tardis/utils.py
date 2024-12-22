@@ -27,6 +27,46 @@ from torchgeo.datamodules.eurosat import SPATIAL_MEAN, SPATIAL_STD
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    GradientBoostingClassifier,
+    AdaBoostClassifier,
+    ExtraTreesClassifier,
+)
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.cluster import KMeans, DBSCAN
+
+# Define classifiers
+classifiers = {
+    "RandomForestUnblanaced": RandomForestClassifier(n_estimators=100, random_state=42),
+    "RandomForest": RandomForestClassifier(
+        n_estimators=100, class_weight="balanced", random_state=42
+    ),
+    "SVC": SVC(probability=True, class_weight="balanced", random_state=42),
+    "KNeighbors": KNeighborsClassifier(),
+    "LogisticRegression": LogisticRegression(
+        class_weight="balanced", max_iter=500, random_state=42
+    ),
+    "DecisionTree": DecisionTreeClassifier(class_weight="balanced", random_state=42),
+    "GradientBoosting": GradientBoostingClassifier(random_state=42),
+    "AdaBoost": AdaBoostClassifier(random_state=42),
+    "ExtraTrees": ExtraTreesClassifier(
+        n_estimators=100, class_weight="balanced", random_state=42
+    ),
+    "GaussianNB": GaussianNB(),
+}
+
+# Define clustering methods
+clustering_methods = {
+    "KMeans": KMeans(n_clusters=3, init="k-means++", random_state=42),
+    "DBSCAN_eps_0.1": DBSCAN(eps=0.1, min_samples=5),
+    "DBSCAN_eps_0.2": DBSCAN(eps=0.2, min_samples=5),
+    "DBSCAN_eps_0.5": DBSCAN(eps=0.5, min_samples=5),
+}
 
 def set_seed(seed):
     """
@@ -689,7 +729,7 @@ def create_feature_matrix_and_labels(
     X, y = [], []
 
     # Process train dataloader
-    train_activations, train_property_lengths, train_images = (
+    train_activations, train_property_lengths = (
         collect_and_process_activations(
             model=model,
             dm=dm,
@@ -710,7 +750,7 @@ def create_feature_matrix_and_labels(
         y.extend([0] * len(train_activations[layer_name]["activations"]))  # Train label
 
     # Process test dataloader
-    test_activations, test_property_lengths, test_images = (
+    test_activations, test_property_lengths = (
         collect_and_process_activations(
             model=model,
             dm=dm,
@@ -735,7 +775,7 @@ def create_feature_matrix_and_labels(
         train_property_lengths == test_property_lengths
     ), "Train and test property lengths should match."
 
-    return np.array(X), np.array(y), train_property_lengths, train_images, test_images
+    return np.array(X), np.array(y), train_property_lengths
 
 
 inference_aug = AugmentationSequential(

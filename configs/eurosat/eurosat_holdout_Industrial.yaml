@@ -20,13 +20,13 @@ trainer:
 
 data:
   class_name: Industrial
-  root: "./eurosat_holdout_Industrial"
+  root: "/data/dataood/eurosat_holdout_datasets/eurosat_holdout_Industrial"
   batch_size: 64
   num_workers: 8
-  exclude_class: Industrial
   download: true
-  checksum: true
-
+  checksum: false
+  drop_last: false
+  
 logging:
   path: ./geospatial-ood-detection/experiments
 

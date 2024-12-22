@@ -1,7 +1,7 @@
 defaults:
   - _self_
 
-exp_name: Holdout_Residential_resnet50_0066
+exp_name: Holdout_Forest_resnet50_0066
 
 model:
   name: resnet50
@@ -19,16 +19,16 @@ trainer:
   max_epochs: 50
 
 data:
-  class_name: Residential
-  root: "/home/t-burakekim/ssdprivate/eurosat_holdout_residential"
+  class_name: Forest
+  root: "/data/dataood/eurosat_holdout_datasets/eurosat_holdout_Forest"
   batch_size: 64
   num_workers: 8
-  exclude_class: Residential
   download: true
-  checksum: true
+  checksum: false
+  drop_last: false
 
 logging:
-  path: /home/t-burakekim/azurefiles/geospatial-ood-detection/experiments
+  path: ./geospatial-ood-detection/experiments
 
 training:
   patience: 5

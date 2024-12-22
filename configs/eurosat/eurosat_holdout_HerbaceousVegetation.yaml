@@ -1,7 +1,7 @@
 defaults:
   - _self_
 
-exp_name: Holdout_Forest_resnet50_0066
+exp_name: Holdout_HerbaceousVegetation_resnet50_0066
 
 model:
   name: resnet50
@@ -19,14 +19,14 @@ trainer:
   max_epochs: 50
 
 data:
-  class_name: Forest
-  root: "./eurosat_holdout_forest"
+  class_name: HerbaceousVegetation
+  root: "/data/dataood/eurosat_holdout_datasets/eurosat_holdout_HerbaceousVegetation"
   batch_size: 64
   num_workers: 8
-  exclude_class: Forest
   download: true
-  checksum: true
-
+  checksum: false
+  drop_last: false
+  
 logging:
   path: ./geospatial-ood-detection/experiments
 

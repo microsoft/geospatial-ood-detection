@@ -164,3 +164,4 @@ cython_debug/
 # Noutebook output files 
 notebooks/plots/
 notebooks/ood_classifier.pkl
+notebooks/benchmark/

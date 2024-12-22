@@ -20,13 +20,13 @@ trainer:
 
 data:
   class_name: Highway
-  root: "./eurosat_holdout_Highway"
+  root: "/data/dataood/eurosat_holdout_datasets/eurosat_holdout_Highway"
   batch_size: 64
   num_workers: 8
-  exclude_class: Highway
   download: true
-  checksum: true
-
+  checksum: false
+  drop_last: false
+  
 logging:
   path: ./geospatial-ood-detection/experiments
 

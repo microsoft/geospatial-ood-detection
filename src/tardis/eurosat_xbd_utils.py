@@ -148,7 +148,7 @@ def get_X_y_arrays(
         len(test_dataloader),
     )
 
-    X, y, _, train_images, test_images = (
+    X, y, _ = (
         create_feature_matrix_and_labels(
             model=model,
             dm=datamodule,
@@ -172,13 +172,11 @@ def get_X_y_arrays(
         val_dataloader,
         test_dataloader,
         cfg_dict,
-        train_images,
-        test_images,
     )
 
 
 def run_g_experiment(
-    X, y, split_seed, test_size, _, fixed_classifier_seed, clf=None
+    X, y, split_seed, test_size, n_estimators, fixed_classifier_seed, clf=None
 ):
     X_train_cluster, X_val_baseline, y_train_cluster, y_val_baseline = train_test_split(
         X, y, test_size=test_size, random_state=split_seed
@@ -420,10 +418,7 @@ def objective(
         incorrect_id / actual_id_samples if actual_id_samples > 0 else 0
     )
 
-    if clf is None:
-        clf = LogisticRegression(
-            class_weight="balanced", max_iter=500, random_state=fixed_seed
-        )
+    clf = LogisticRegression(class_weight="balanced", max_iter=500, random_state=fixed_seed)
 
     model = make_pipeline(StandardScaler(), clf)
     model.fit(X_train_cluster, y_clusters)
@@ -583,7 +578,6 @@ def run_g_hat_experiment(
         if cluster_idx not in ood_cluster_indices:
             y_clusters[cluster_labels == cluster_idx] = 0
 
-    # Use the provided classifier or default to RandomForestClassifier
     if clf is None:
         clf = LogisticRegression(
             class_weight="balanced", max_iter=500, random_state=fixed_seed
@@ -618,7 +612,7 @@ def run_g_hat_experiment(
         y_train_cluster,
         y_clusters,
         train_indices,
-        baseline_indices,
+        baseline_indices
     )
 
 
