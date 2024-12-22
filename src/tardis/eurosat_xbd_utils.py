@@ -1207,8 +1207,7 @@ def plot_downsample_benchmark(data, class_name, save_dir="benchmark"):
     ax.set_ylabel("Scores")
     ax.set_title(f"Comparison of Accuracy, AUROC, and FPR95 for {class_name}")
     ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-
+    ax.set_xticklabels(labels, rotation=20)
     ax.grid(True, axis="y", linestyle="--", alpha=0.7)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -1458,7 +1457,7 @@ def prepare_datamodule(cfg):
             same_on_batch=False,
         ),
         data_keys=None,
-    ).to(cfg.device)
+    ).to(cfg.training.device)
 
     val_aug = K.AugmentationSequential(
         kornia.contrib.Lambda(normalize),
@@ -1469,7 +1468,7 @@ def prepare_datamodule(cfg):
             same_on_batch=False,
         ),
         data_keys=None,
-    ).to(cfg.device)
+    ).to(cfg.training.device)
 
     test_aug = K.AugmentationSequential(
         kornia.contrib.Lambda(normalize),
@@ -1480,7 +1479,7 @@ def prepare_datamodule(cfg):
             same_on_batch=False,
         ),
         data_keys=None,
-    ).to(cfg.device)
+    ).to(cfg.training.device)
 
     cfg.training.num_workers = 0
 
