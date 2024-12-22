@@ -1,4 +1,4 @@
-base_dir: "BASE DIR"  
+base_dir: "/data/dataood/"  
 paths:  
   model_checkpoint: "FTW-25-Experiment-1-1-4_model.ckpt"  
   root_folder_torchgeo: "FTW_TorchGeo"  
