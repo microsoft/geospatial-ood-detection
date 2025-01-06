@@ -20,12 +20,12 @@ trainer:
 
 data:
   class_name: SeaLake
-  root: "./eurosat_holdout_SeaLake"
+  root: "/data/dataood/eurosat_holdout_datasets/eurosat_holdout_SeaLake"
   batch_size: 64
   num_workers: 8
-  exclude_class: SeaLake
   download: true
-  checksum: true
+  checksum: false
+  drop_last: false
 
 logging:
   path: ./geospatial-ood-detection/experiments

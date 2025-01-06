@@ -6,7 +6,7 @@ exp_name: "xview2_santa-rosa-wildfire-post_woolsey-fire-post_02"
 id_ood_disaster: [{"disaster_name": "santa-rosa-wildfire", "pre-post": "post"}, {"disaster_name": "woolsey-fire", "pre-post": "post"}]
 
 paths:
-  root: "./xview2/xview2/geotiffs"
+  root: "/data/dataood/xview2/"
   default_root_dir: "experiments"
 
 dataset:
@@ -24,6 +24,7 @@ training:
   pin_memory: False
   persistent_workers: False
   num_workers: 0
+  device: 'cuda'
 
 model:
   type: "unet"

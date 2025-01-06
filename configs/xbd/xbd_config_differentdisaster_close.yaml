@@ -1,12 +1,12 @@
 defaults:
   - _self_
 
-exp_name: "xview2_hurricane-matthew_post_nepal_flood_post_01"
+exp_name: "xview2_hurricane-matthew_mexico-earthquake_01"
 
-id_ood_disaster: [{"disaster_name": "hurricane-matthew", "pre-post": "post"}, {"disaster_name": "nepal-flooding", "pre-post": "post"}]
+id_ood_disaster: [{"disaster_name": "hurricane-matthew", "pre-post": "post"}, {"disaster_name": "mexico-earthquake", "pre-post": "post"}]
 
 paths:
-  root: "./xview2/xview2/geotiffs"
+  root: "/data/dataood/xview2/"
   default_root_dir: "experiments"
 
 dataset:
@@ -24,6 +24,7 @@ training:
   pin_memory: False
   persistent_workers: False
   num_workers: 0
+  device: 'cuda'
 
 model:
   type: "unet"

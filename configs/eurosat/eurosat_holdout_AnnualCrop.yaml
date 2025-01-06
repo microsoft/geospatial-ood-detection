@@ -20,13 +20,13 @@ trainer:
 
 data:
   class_name: AnnualCrop
-  root: "./eurosat_holdout_AnnualCrop"
+  root: "/data/dataood/eurosat_holdout_datasets/eurosat_holdout_AnnualCrop"
   batch_size: 64
   num_workers: 8
-  exclude_class: AnnualCrop
   download: true
-  checksum: true
-
+  checksum: false
+  drop_last: false
+  
 logging:
   path: ./geospatial-ood-detection/experiments
 

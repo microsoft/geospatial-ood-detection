@@ -20,13 +20,13 @@ trainer:
 
 data:
   class_name: Pasture
-  root: "./eurosat_holdout_Pasture"
+  root: "/data/dataood/eurosat_holdout_datasets/eurosat_holdout_Pasture"
   batch_size: 64
   num_workers: 8
-  exclude_class: Pasture
   download: true
-  checksum: true
-
+  checksum: false
+  drop_last: false
+  
 logging:
   path: ./geospatial-ood-detection/experiments
 

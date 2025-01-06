@@ -18,6 +18,16 @@ from torchgeo.transforms import AugmentationSequential
 
 class EuroSATSpatialDataModuleAug(NonGeoDataModule):
     def __init__(self, root, batch_size=64, num_workers=0, device="cuda", **kwargs):
+        """
+        DataModule for EuroSATSpatial dataset with augmentations for training, validation, and testing.
+
+        Args:
+            root (str): Path to the dataset root directory.
+            batch_size (int): Batch size for DataLoaders.
+            num_workers (int): Number of workers for data loading.
+            device (str): Device to use for computation ("cuda" or "cpu").
+            **kwargs: Additional arguments passed to the dataset class.
+        """
         super().__init__(
             EuroSATSpatial, batch_size=batch_size, num_workers=num_workers, **kwargs
         )
@@ -66,6 +76,12 @@ class EuroSATSpatialDataModuleAug(NonGeoDataModule):
         ).to(device)
 
     def setup(self, stage: str) -> None:
+        """
+        Set up datasets for training, validation, and testing.
+
+        Args:
+            stage (str): Stage of processing - "fit", "test", or None.
+        """
         if stage == "fit" or stage is None:
             self.train_dataset = EuroSATSpatial(self.root, split="train", **self.kwargs)
             self.val_dataset = EuroSATSpatial(self.root, split="val", **self.kwargs)
@@ -73,6 +89,12 @@ class EuroSATSpatialDataModuleAug(NonGeoDataModule):
             self.test_dataset = EuroSATSpatial(self.root, split="test", **self.kwargs)
 
     def train_dataloader(self) -> DataLoader:
+        """
+        Create a DataLoader for the training dataset.
+
+        Returns:
+            DataLoader: DataLoader for training data.
+        """
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -82,6 +104,12 @@ class EuroSATSpatialDataModuleAug(NonGeoDataModule):
         )
 
     def val_dataloader(self) -> DataLoader:
+        """
+        Create a DataLoader for the validation dataset.
+
+        Returns:
+            DataLoader: DataLoader for validation data.
+        """
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
@@ -90,6 +118,12 @@ class EuroSATSpatialDataModuleAug(NonGeoDataModule):
         )
 
     def test_dataloader(self) -> DataLoader:
+        """
+        Create a DataLoader for the test dataset.
+
+        Returns:
+            DataLoader: DataLoader for test data.
+        """
         return DataLoader(
             self.test_dataset,
             batch_size=self.batch_size,
@@ -104,16 +138,26 @@ class EuroSATClassHoldOut(EuroSAT):
         class_name,
         root,
         split="train",
-        download=False,
-        checksum=False,
+        download=True,
+        checksum=True,
         exclude_class=None,
         **kwargs,
     ):
+        """
+        EuroSAT dataset with support for holding out a specific class.
+
+        Args:
+            class_name (str): Name of the class to include or exclude.
+            root (str): Root directory for the dataset.
+            split (str): Dataset split - "train", "val", or "test".
+            download (bool): Whether to download the dataset.
+            checksum (bool): If True, verifies the dataset integrity.
+            exclude_class (str): Name of the class to exclude for training/validation.
+            **kwargs: Additional arguments passed to the base EuroSAT class.
+        """
         self.split = split
         self.exclude_class = exclude_class
-        super().__init__(
-            root=root, split=split, download=download, checksum=checksum, **kwargs
-        )
+
         # Base URL and class name setup
         self.base_url = (
             "https://huggingface.co/datasets/brkekm/EuroSATHoldOutSplits/resolve/main/"
@@ -126,17 +170,26 @@ class EuroSATClassHoldOut(EuroSAT):
             "val": f"{self.base_url}val_{self._class_name}.txt",
             "test": f"{self.base_url}test_{self._class_name}.txt",
         }
+        print("self.split_urls", self.split_urls)
+
+        self.root = root
+        print("self.root", self.root)
 
         super().__init__(
             root=root, split=split, download=download, checksum=checksum, **kwargs
         )
-        self.urls = self.split_urls
 
     def find_classes(self, directory: str):
         """
-        Find the class folders in the dataset directory, optionally including only a specific class
-        for testing or excluding it for training/validation.
+        Find class folders in the dataset directory.
+
+        Args:
+            directory (str): Path to the dataset directory.
+
+        Returns:
+            tuple: A list of active classes and a mapping of class names to indices.
         """
+
         classes = [entry.name for entry in os.scandir(directory) if entry.is_dir()]
 
         if self.split == "test" and self.exclude_class:
@@ -171,15 +224,40 @@ class EuroSATClassHoldOut(EuroSAT):
 
     @property
     def active_classes(self):
-        """Returns the list of currently active classes."""
+        """
+        Get the list of currently active classes.
+
+        Returns:
+            dict: Dictionary mapping class names to indices.
+        """
         print("Class to idx", self.class_to_idx)
         return self.class_to_idx
 
 
 class EuroSATClassHoldOutAug(NonGeoDataModule):
     def __init__(
-        self, class_name, root, batch_size=64, num_workers=0, device="cuda", **kwargs
+        self,
+        class_name,
+        root,
+        batch_size=64,
+        num_workers=0,
+        device="cuda",
+        drop_last=True,
+        **kwargs,
     ):
+        """
+        EuroSAT DataModule with support for holdout classes and augmentations.
+
+        Args:
+            class_name (str): Name of the class to include/exclude.
+            root (str): Path to the dataset root directory.
+            batch_size (int): Batch size for DataLoaders.
+            num_workers (int): Number of workers for data loading.
+            device (str): Device to use for computation ("cuda" or "cpu").
+            drop_last (bool): If True, drops the last incomplete batch.
+            **kwargs: Additional arguments passed to the base DataModule class.
+        """
+
         super().__init__(
             EuroSATClassHoldOut,
             class_name=class_name,
@@ -190,18 +268,21 @@ class EuroSATClassHoldOutAug(NonGeoDataModule):
         )
         self.device = device
         self.root = root
+        self.drop_last = drop_last
         self.class_name = class_name
         kwargs.get("bands", EuroSAT.all_band_names)
-        MEAN, STD = self.load_statistics(os.path.dirname(self.root), class_name)
-        print(f"Loaded statistics for {class_name}: MEAN={MEAN}, STD={STD}")
+        self.MEAN, self.STD = self.load_statistics(
+            os.path.dirname(self.root), class_name
+        )
+        print(f"Loaded statistics for {class_name}: MEAN={self.MEAN}, STD={self.STD}")
 
         self.train_aug = AugmentationSequential(
             K.RandomRotation(p=0.5, degrees=90, keepdim=True, same_on_batch=False),
             K.RandomHorizontalFlip(p=0.5, keepdim=True, same_on_batch=False),
             K.RandomVerticalFlip(p=0.5, keepdim=True, same_on_batch=False),
             K.Normalize(
-                mean=list(MEAN.values()),
-                std=list(STD.values()),
+                mean=list(self.MEAN.values()),
+                std=list(self.STD.values()),
                 p=1.0,
                 keepdim=True,
             ),
@@ -212,8 +293,8 @@ class EuroSATClassHoldOutAug(NonGeoDataModule):
 
         self.val_aug = AugmentationSequential(
             K.Normalize(
-                mean=list(MEAN.values()),
-                std=list(STD.values()),
+                mean=list(self.MEAN.values()),
+                std=list(self.STD.values()),
                 p=1.0,
                 keepdim=True,
             ),
@@ -223,8 +304,8 @@ class EuroSATClassHoldOutAug(NonGeoDataModule):
 
         self.test_aug = AugmentationSequential(
             K.Normalize(
-                mean=list(MEAN.values()),
-                std=list(STD.values()),
+                mean=list(self.MEAN.values()),
+                std=list(self.STD.values()),
                 p=1.0,
                 keepdim=True,
             ),
@@ -233,14 +314,79 @@ class EuroSATClassHoldOutAug(NonGeoDataModule):
         )
 
     def setup(self, stage: str) -> None:
+        """
+        Set up datasets for training, validation, and testing.
+
+        Args:
+            stage (str): Stage of processing - "fit", "test", or None.
+        """
         if stage == "fit" or stage is None:
             self.train_dataset = EuroSATClassHoldOut(split="train", **self.kwargs)
+            print("self.train_dataset.split_urls", self.train_dataset.split_urls)
             self.val_dataset = EuroSATClassHoldOut(split="val", **self.kwargs)
         if stage == "test" or stage is None:
             self.test_dataset = EuroSATClassHoldOut(split="test", **self.kwargs)
 
+    def train_dataloader(self):
+        """
+        Create a DataLoader for the training dataset.
+
+        Returns:
+            DataLoader: DataLoader for training data.
+        """
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,  # Typically shuffle training data
+            num_workers=self.num_workers,
+            drop_last=self.drop_last,  # Drop last incomplete batch if specified
+            pin_memory=True,  # Optimize data transfer to GPU
+        )
+
+    def val_dataloader(self):
+        """
+        Create a DataLoader for the validation dataset.
+
+        Returns:
+            DataLoader: DataLoader for validation data.
+        """
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            drop_last=self.drop_last,
+            pin_memory=True,
+        )
+
+    def test_dataloader(self):
+        """
+        Create a DataLoader for the test dataset.
+
+        Returns:
+            DataLoader: DataLoader for test data.
+        """
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            drop_last=self.drop_last,
+            pin_memory=True,
+        )
+
     def load_statistics(self, root, class_name):
-        statistics_file_path = os.path.join(root, "eurosat_holdout_statistics.json")
+        """
+        Load per-class statistics (mean and standard deviation).
+
+        Args:
+            root (str): Path to the dataset root directory.
+            class_name (str): Name of the class for which statistics are loaded.
+
+        Returns:
+            tuple: Dictionaries containing mean and standard deviation values.
+        """
+        statistics_file_path = "/data/dataood/eurosat_holdout_statistics.json"
         with open(statistics_file_path, "r") as f:
             all_statistics = json.load(f)
         mean_key = f"{class_name}_MEAN"
@@ -265,6 +411,20 @@ class EuroSATClassHoldOutGeoExtract(EuroSAT):
         transforms=None,
         **kwargs,
     ):
+        """
+        EuroSAT dataset with geolocation extraction for holdout class experiments.
+
+        Args:
+            class_name (str): Name of the class to include/exclude.
+            root (str): Root directory for the dataset.
+            split_dir (str): Directory containing split files.
+            split (str): Dataset split - "train", "val", or "test".
+            download (bool): Whether to download the dataset.
+            checksum (bool): If True, verifies dataset integrity.
+            exclude_class (str): Name of the class to exclude during training/validation.
+            transforms (callable): Transformations to apply to the images.
+            **kwargs: Additional arguments passed to the base EuroSAT class.
+        """
         self.split = split
         self.exclude_class = exclude_class
 
@@ -281,17 +441,23 @@ class EuroSATClassHoldOutGeoExtract(EuroSAT):
             "test": f"{self.base_url}test_{self._class_name}.txt",
         }
 
-        super().__init__(
-            root=root, split=split, download=download, checksum=checksum, **kwargs
-        )
         self.urls = self.split_urls
         self.transforms = transforms
         print("self.transforms", self.transforms)
 
+        super().__init__(
+            root=root, split=split, download=download, checksum=checksum, **kwargs
+        )
+
     def find_classes(self, directory: str):
         """
-        Find the class folders in the dataset directory, optionally including only a specific class
-        for testing or excluding it for training/validation.
+        Find class folders in the dataset directory.
+
+        Args:
+            directory (str): Path to the dataset directory.
+
+        Returns:
+            tuple: A list of active classes and a mapping of class names to indices.
         """
         classes = [entry.name for entry in os.scandir(directory) if entry.is_dir()]
 
@@ -327,11 +493,22 @@ class EuroSATClassHoldOutGeoExtract(EuroSAT):
 
     @property
     def active_classes(self):
-        """Returns the list of currently active classes."""
+        """
+        Get the list of currently active classes.
+
+        Returns:
+            dict: Dictionary mapping class names to indices.
+        """
         print("Class to IDX", self.class_to_idx)
         return self.class_to_idx
 
     def _load_split_data(self, split_dir):
+        """
+        Load split-specific data from text files.
+
+        Args:
+            split_dir (str): Directory containing split files.
+        """
         split_file = f"{split_dir}/eurosat-{self.split}.txt"
         if not os.path.exists(split_file):
             raise FileNotFoundError(f"No such file for split data: {split_file}")
@@ -351,15 +528,39 @@ class EuroSATClassHoldOutGeoExtract(EuroSAT):
                     )
 
     def __len__(self):
+        """
+        Get the total number of samples in the dataset.
+
+        Returns:
+            int: Total number of samples.
+        """
         return len(self.samples)
 
     def __getitem__(self, idx):
+        """
+        Get a single sample from the dataset.
+
+        Args:
+            idx (int): Index of the sample.
+
+        Returns:
+            dict: Dictionary containing the image, label, and file path.
+        """
         path_class = self.samples[idx]
         image = self._load_image(path_class[0])
         image = self.transforms(image)
         return {"image": image, "label": path_class[1], "path": path_class[0]}
 
     def _load_image(self, path):
+        """
+        Load an image from a given file path.
+
+        Args:
+            path (str): Path to the image file.
+
+        Returns:
+            torch.Tensor: Image tensor.
+        """
         with rasterio.open(path) as src:
             array = src.read().astype("float32")
         tensor = torch.from_numpy(array)

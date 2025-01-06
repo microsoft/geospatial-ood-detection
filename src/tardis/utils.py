@@ -27,24 +27,81 @@ from torchgeo.datamodules.eurosat import SPATIAL_MEAN, SPATIAL_STD
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    GradientBoostingClassifier,
+    AdaBoostClassifier,
+    ExtraTreesClassifier,
+)
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.cluster import KMeans, DBSCAN
+
+# Define classifiers
+classifiers = {
+    "RandomForestUnblanaced": RandomForestClassifier(n_estimators=100, random_state=42),
+    "RandomForest": RandomForestClassifier(
+        n_estimators=100, class_weight="balanced", random_state=42
+    ),
+    "SVC": SVC(probability=True, class_weight="balanced", random_state=42),
+    "KNeighbors": KNeighborsClassifier(),
+    "LogisticRegression": LogisticRegression(
+        class_weight="balanced", max_iter=500, random_state=42
+    ),
+    "DecisionTree": DecisionTreeClassifier(class_weight="balanced", random_state=42),
+    "GradientBoosting": GradientBoostingClassifier(random_state=42),
+    "AdaBoost": AdaBoostClassifier(random_state=42),
+    "ExtraTrees": ExtraTreesClassifier(
+        n_estimators=100, class_weight="balanced", random_state=42
+    ),
+    "GaussianNB": GaussianNB(),
+}
+
+# Define clustering methods
+clustering_methods = {
+    "KMeans": KMeans(n_clusters=3, init="k-means++", random_state=42),
+    "DBSCAN_eps_0.1": DBSCAN(eps=0.1, min_samples=5),
+    "DBSCAN_eps_0.2": DBSCAN(eps=0.2, min_samples=5),
+    "DBSCAN_eps_0.5": DBSCAN(eps=0.5, min_samples=5),
+}
 
 def set_seed(seed):
+    """
+    Set the random seed for reproducibility across libraries.
+
+    Args:
+        seed (int): The random seed value.
+
+    Returns:
+        None
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-    # For reproducibility
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
 
-# Function to load experiment details
 def load_exp_ev_metrics_json(
     exp_name,
-    base_dir="geospatial-ood-detection/experiments",
+    base_dir,
 ):
+    """
+    Load experiment evaluation metrics from a JSON file.
+
+    Args:
+        exp_name (str): Name of the experiment.
+        base_dir (str): Base directory containing experiment results (default: "geospatial-ood-detection/experiments").
+
+    Returns:
+        dict: A dictionary containing experiment results.
+    """
     results_path = os.path.join(
         base_dir, exp_name, "test_eval_results_{}.json".format(exp_name)
     )
@@ -54,17 +111,33 @@ def load_exp_ev_metrics_json(
         results = json.load(f)
     return results
 
-
-# Function to collect the names of all layers
 def get_all_layer_names(model):
+    """
+    Retrieve the names of all layers in a model.
+
+    Args:
+        model (torch.nn.Module): The PyTorch model.
+
+    Returns:
+        list: A list of layer names.
+    """
     layer_names = []
     for name, _ in model.named_modules():
         layer_names.append(name)
     return layer_names
 
 
-# Function to collect the names and shapes of all layers
 def get_layer_shapes(model, input_tensor):
+    """
+    Retrieve the input and output shapes of all layers in a model.
+
+    Args:
+        model (torch.nn.Module): The PyTorch model.
+        input_tensor (torch.Tensor): Example input tensor for the model.
+
+    Returns:
+        list: A list of tuples containing layer names, input shapes, and output shapes.
+    """
     layer_shapes = []
 
     def hook_fn(module, input, output):
@@ -84,7 +157,6 @@ def get_layer_shapes(model, input_tensor):
             hooks.append(layer.register_forward_hook(hook_fn))
             layer_name_map[layer] = name
 
-    # Perform a forward pass to trigger the hooks
     model(input_tensor)
 
     # Remove the hooks
@@ -95,54 +167,66 @@ def get_layer_shapes(model, input_tensor):
 
 
 def get_conv_layer_names(model, layer_shapes):
-    """Extract names of all convolutional layers."""
+    """
+    Extract the names of all convolutional layers in a model.
+
+    Args:
+        model (torch.nn.Module): The PyTorch model.
+        layer_shapes (list): List of tuples containing layer shapes.
+
+    Returns:
+        list: A list of convolutional layer names.
+    """
     conv_layers = []
-    for layer_full_name, input_shape, output_shape in layer_shapes:
+    for layer_full_name, _, _ in layer_shapes:
         if isinstance(getattr(model, layer_full_name), nn.Conv2d):
             conv_layers.append(layer_full_name)
     return conv_layers
 
 
 def extract_rgb(image, channel_order=(3, 2, 1)):
-    """Extract and stack RGB channels from a Sentinel-2 image.
+    """
+    Extract and stack RGB channels from a Sentinel-2 image tensor.
 
     Args:
         image (torch.Tensor): Multi-channel image tensor.
-        channel_order (tuple): The channel indices for R, G, and B channels.
+        channel_order (tuple): Channel indices for R, G, and B (default: (3, 2, 1)).
 
     Returns:
-        torch.Tensor: RGB image tensor.
+        torch.Tensor: RGB image tensor in (H, W, C) format.
     """
     rgb_image = image[channel_order, :, :]
-    return rgb_image.permute(1, 2, 0)  # Permute to get (H, W, C) for visualization
+    return rgb_image.permute(1, 2, 0)
 
 
 def extract_rgb_np(image, channel_order=(3, 2, 1)):
-    """Extract and stack RGB channels from a multi-channel numpy image.
+    """
+    Extract and stack RGB channels from a multi-channel numpy image.
 
     Args:
         image (np.ndarray): Multi-channel image array.
-        channel_order (tuple): The channel indices for R, G, and B channels.
+        channel_order (tuple): Channel indices for R, G, and B (default: (3, 2, 1)).
 
     Returns:
-        np.ndarray: RGB image array.
+        np.ndarray: RGB image array in (H, W, C) format.
     """
     rgb_image = image[channel_order, :, :]
     return np.transpose(
         rgb_image, (1, 2, 0)
-    )  # Transpose to get (H, W, C) for visualization
+    )
 
 
 def percentile_stretch(image, p1=1, p99=99):
-    """Apply percentile stretching to an image.
+    """
+    Apply percentile stretching to an image for normalization.
 
     Args:
-        image (numpy.ndarray): The image to be stretched.
-        p1 (int): The lower percentile.
-        p99 (int): The upper percentile.
+        image (np.ndarray): Input image array.
+        p1 (int): Lower percentile for stretching (default: 1).
+        p99 (int): Upper percentile for stretching (default: 99).
 
     Returns:
-        numpy.ndarray: The stretched image.
+        np.ndarray: Stretched image normalized to the range [0, 1].
     """
     # Compute the lower and upper percentile values
     vmin = np.percentile(image, p1)
@@ -156,11 +240,22 @@ def percentile_stretch(image, p1=1, p99=99):
 
 
 def collect_data_to_save(dataloader, device, return_filename=True):
+    """
+    Collect images, labels, and filenames from a DataLoader.
+
+    Args:
+        dataloader (torch.utils.data.DataLoader): DataLoader for batch processing.
+        device (str): Device to move the tensors to.
+        return_filename (bool): If True, returns filenames (default: True).
+
+    Returns:
+        tuple: Arrays containing images, labels, and optionally filenames.
+    """
     images_list = []
     labels_list = []
     filenames_list = []
 
-    for batch_idx, sample in tqdm.tqdm(enumerate(dataloader)):
+    for _, sample in tqdm.tqdm(enumerate(dataloader)):
         images = sample["image"].to(device)
         labels = sample["label"].to(device)
 
@@ -182,6 +277,16 @@ def collect_data_to_save(dataloader, device, return_filename=True):
 
 
 def load_data(data_file, return_filename=True):
+    """
+    Load image and label data from a `.npz` file.
+
+    Args:
+        data_file (str): Path to the `.npz` file.
+        return_filename (bool): If True, returns filenames (default: True).
+
+    Returns:
+        tuple: Arrays containing images, labels, and optionally filenames.
+    """
     data = np.load(data_file, allow_pickle=True)
     images = data["images"]
     labels = data["labels"]
@@ -193,7 +298,15 @@ def load_data(data_file, return_filename=True):
 
 
 def compute_overall_statistics(images):
-    # Flatten the images array and calculate the mean and standard deviation
+    """
+    Compute the overall mean and standard deviation for an image dataset.
+
+    Args:
+        images (array-like): Input image dataset.
+
+    Returns:
+        tuple: Mean and standard deviation of the flattened image dataset.
+    """
     flat_images = images.flatten()
     mean = np.mean(flat_images)
     std = np.std(flat_images)
@@ -202,15 +315,17 @@ def compute_overall_statistics(images):
 
 def plot_data_distributions(train_data, val_data, test_data, title_prefix):
     """
-    Plots the KDE and combined histogram of train, validation, and test data distributions.
+    Plot data distributions for train, validation, and test datasets.
 
     Args:
-    - train_data (array-like): Training data.
-    - val_data (array-like): Validation data.
-    - test_data (array-like): Test data.
-    - title_prefix (str): Prefix for the plot titles.
+        train_data (array-like): Training dataset.
+        val_data (array-like): Validation dataset.
+        test_data (array-like): Test dataset.
+        title_prefix (str): Prefix for the plot titles.
+
+    Returns:
+        None
     """
-    # Plot the mean statistics
     plt.figure(figsize=(12, 6))
     sns.kdeplot(train_data, color="blue", label="Train Data", fill=True)
     sns.kdeplot(val_data, color="green", label="Validation Data", fill=True)
@@ -221,10 +336,8 @@ def plot_data_distributions(train_data, val_data, test_data, title_prefix):
     plt.legend()
     plt.show()
 
-    # Create a combined dataframe for better comparison
     df = pd.DataFrame({"Train": train_data, "Validation": val_data, "Test": test_data})
 
-    # Plot the combined data
     plt.figure(figsize=(12, 6))
     sns.histplot(df, kde=True, stat="density", element="step", fill=True)
     plt.title(f"{title_prefix} -- Overall Data Distribution")
@@ -244,6 +357,31 @@ def collect_layer_activations(
     collect_aug_input,
     collect_annot_preds=False,
 ):
+    """
+    Collect activations from specified layers of a model during forward passes.
+
+    This function uses the `LayerActivationExtractor` class to register hooks on specified layers 
+    and extract activations as the model processes batches from a DataLoader.
+
+    Args:
+        model (torch.nn.Module): The PyTorch model to extract activations from.
+        dm: Data module that provides augmentations for the input data.
+        dataloader (torch.utils.data.DataLoader): DataLoader to iterate over batches of input data.
+        layer_names (list): List of layer names from which to collect activations.
+        device (str): Device to run the model on ("cuda" or "cpu").
+        n_batches_to_process (int): Number of batches to process from the DataLoader.
+        getitem_keys (list): Keys to extract the relevant data (e.g., image, label) from the batch.
+        collect_aug_input (bool): If True, collects augmented inputs in addition to activations.
+        collect_annot_preds (bool): If True, collects annotations (ground truth) and model predictions.
+
+    Returns:
+        dict: A dictionary containing the following keys:
+            - "activations" (dict): Activations from the specified layers.
+            - "annotations" (np.ndarray, optional): Ground truth labels (if `collect_annot_preds` is True).
+            - "predictions" (np.ndarray, optional): Model predictions (if `collect_annot_preds` is True).
+            - "aug_inputs" (np.ndarray, optional): Augmented input tensors (if `collect_aug_input` is True).
+    """
+
     extractor = LayerActivationExtractor(model, device)
     return extractor.collect_activations(
         dm,
@@ -258,6 +396,13 @@ def collect_layer_activations(
 
 class LayerActivationExtractor:
     def __init__(self, model, device):
+        """
+        Extract activations from specific layers of a PyTorch model.
+
+        Args:
+            model (torch.nn.Module): The PyTorch model.
+            device (str): Device to run the model on ("cuda" or "cpu").
+        """
         self.model = model.to(device)
         self.device = device
         self.activations = {}
@@ -297,6 +442,23 @@ class LayerActivationExtractor:
         collect_aug_input=False,
         device="cuda",
     ):
+        """
+        Collect activations from specified layers during forward passes.
+
+        Args:
+            dm: Data module for augmentations.
+            dataloader (torch.utils.data.DataLoader): DataLoader to process batches.
+            layer_names (list): List of layer names to collect activations from.
+            getitem_keys (list): Keys to extract data from batches.
+            n_batches_to_process (int): Number of batches to process.
+            collect_annot_preds (bool): If True, collects predictions and annotations.
+            collect_aug_input (bool): If True, collects augmented input tensors.
+            device (str): Device to perform computations on.
+
+        Returns:
+            dict: Dictionary containing activations, annotations, predictions, and optionally augmented inputs.
+        """
+
         self.model.eval()
         self.activations = {}
         self.hook_handles = []
@@ -350,21 +512,33 @@ class LayerActivationExtractor:
 
 
 def convert_activations_to_numpy(activations):
+    """
+    Convert activations collected during forward passes into numpy arrays.
+
+    Args:
+        activations (dict): Dictionary containing layer activations as lists of tensors.
+
+    Returns:
+        dict: Dictionary with layer names as keys and numpy arrays of activations as values.
+    """
     numpy_activations = {}
     for name, acts in activations.items():
         numpy_activations[name] = np.array(
             acts
-        )  # Keep as individual sample activations
+        )
     return numpy_activations
 
 
 def downsample_activations(activations, method="mean_std"):
     """
-    Apply downsampling to the activations based on the specified method.
+    Downsample activations using specified methods.
 
-    :param activations: Dictionary of layer activations.
-    :param method: Method for downsampling. Supported: 'mean_std', 'avg_pool', 'max_pool'.
-    :return: A dictionary with the same structure as activations, containing the downsampled data.
+    Args:
+        activations (dict): Dictionary containing activations for each layer.
+        method (str): Downsampling method - 'mean_std', 'avg_pool', 'max_pool', or 'nodownsample'.
+
+    Returns:
+        dict: Dictionary with downsampled activations.
     """
     if method == "nodownsample":
         pca = PCA(n_components=10)
@@ -416,6 +590,7 @@ def downsample_activations(activations, method="mean_std"):
             )
             downsampled_activations[layer_name] = max_pooled_activations.numpy()
         elif method == "nodownsample":
+            # Apply PCA
             B, C, H, W = layer_activations_tensor.shape
             layer_act_b_x = layer_activations_tensor.reshape(B, C * H * W)
             reduced_data = pca.fit_transform(layer_act_b_x)
@@ -437,6 +612,31 @@ def collect_and_process_activations(
     downsample_method="mean_std",
     verbose=False,
 ):
+    """
+    Collect and process activations from specific model layers using a DataLoader.
+
+    This function collects layer activations, downsamples them using a specified method, and structures them into 
+    a feature matrix.
+
+    Args:
+        model (torch.nn.Module): The PyTorch model to extract activations from.
+        dm: Data module providing augmentations.
+        dataloader (torch.utils.data.DataLoader): DataLoader to iterate over input batches.
+        layer_names (list): List of layer names to collect activations from.
+        device (str): Device to run the model on ("cuda" or "cpu").
+        n_batches_to_process (int): Number of batches to process from the DataLoader.
+        getitem_keys (list): Keys to extract relevant inputs from the data batches.
+        collect_aug_input (bool): If True, collects augmented inputs.
+        downsample_method (str): Method to downsample activations ("mean_std", "avg_pool", "max_pool", etc.).
+        verbose (bool): If True, prints progress and debug information.
+
+    Returns:
+        tuple:
+            - dict: Structured activations with processed outputs for each layer.
+            - dict: Property lengths corresponding to the downsampled activations.
+            - np.ndarray (optional): Augmented inputs, if `collect_aug_input` is True.
+    """
+
     # Step 1: Collect activations
     activations_results = collect_layer_activations(
         model,
@@ -529,7 +729,7 @@ def create_feature_matrix_and_labels(
     X, y = [], []
 
     # Process train dataloader
-    train_activations, train_property_lengths, train_images = (
+    train_activations, train_property_lengths = (
         collect_and_process_activations(
             model=model,
             dm=dm,
@@ -550,7 +750,7 @@ def create_feature_matrix_and_labels(
         y.extend([0] * len(train_activations[layer_name]["activations"]))  # Train label
 
     # Process test dataloader
-    test_activations, test_property_lengths, test_images = (
+    test_activations, test_property_lengths = (
         collect_and_process_activations(
             model=model,
             dm=dm,
@@ -567,15 +767,15 @@ def create_feature_matrix_and_labels(
 
     for layer_name in layer_names:
         for sample_activations in test_activations[layer_name]["activations"]:
-            X.append(sample_activations.flatten())  # Flatten and append
-        y.extend([1] * len(test_activations[layer_name]["activations"]))  # Test label
+            X.append(sample_activations.flatten())
+        y.extend([1] * len(test_activations[layer_name]["activations"]))
 
     assert len(X) == len(y), "X and y should have the same length."
     assert (
         train_property_lengths == test_property_lengths
     ), "Train and test property lengths should match."
 
-    return np.array(X), np.array(y), train_property_lengths, train_images, test_images
+    return np.array(X), np.array(y), train_property_lengths
 
 
 inference_aug = AugmentationSequential(
@@ -589,9 +789,17 @@ inference_aug = AugmentationSequential(
     same_on_batch=True,
 )
 
-
 class GeoTIFFDataset(Dataset):
     def __init__(self, root_dir, split_dir, split="test", transform=None):
+        """
+        Custom PyTorch Dataset for loading GeoTIFF images.
+
+        Args:
+            root_dir (str): Root directory containing the dataset.
+            split_dir (str): Directory containing the split files.
+            split (str): Dataset split - "train", "val", or "test".
+            transform (callable): Transformations to apply to the images.
+        """
         super().__init__()
         self.root_dir = root_dir
         self.transform = transform
@@ -601,6 +809,18 @@ class GeoTIFFDataset(Dataset):
         self._load_split_data(split_dir)
 
     def _load_split_data(self, split_dir):
+        """
+        Load file paths for the specified data split (train, validation, or test).
+
+        Args:
+            split_dir (str): Directory containing split files for the dataset.
+
+        Raises:
+            FileNotFoundError: If the specified split file does not exist.
+
+        Returns:
+            None
+        """
         split_file = f"{split_dir}/eurosat-{self.split}.txt"
         if not os.path.exists(split_file):
             raise FileNotFoundError(f"No such file for split data: {split_file}")
@@ -610,7 +830,7 @@ class GeoTIFFDataset(Dataset):
                 filename = line.strip()
                 class_label = filename.split("_")[
                     0
-                ]  # Assuming class_label is the prefix
+                ]
                 full_path = os.path.join(self.root_dir, class_label, filename)
                 if os.path.exists(full_path.replace(".jpg", ".tif")):
                     self.samples.append(
@@ -618,9 +838,25 @@ class GeoTIFFDataset(Dataset):
                     )
 
     def __len__(self):
+        """
+        Return the total number of samples in the dataset.
+
+        Returns:
+            int: Total number of samples.
+        """
         return len(self.samples)
 
     def __getitem__(self, idx):
+        """
+        Retrieve a sample by index.
+
+        Args:
+            idx (int): Index of the sample.
+
+        Returns:
+            dict: Dictionary containing the image, label, and file path.
+        """
+
         path_class = self.samples[idx]
         image = self._load_image(path_class[0])
 
@@ -630,6 +866,16 @@ class GeoTIFFDataset(Dataset):
         return {"image": image, "label": path_class[1], "path": path_class[0]}
 
     def _load_image(self, path):
+        """
+        Load a GeoTIFF image as a tensor.
+
+        Args:
+            path (str): Path to the image file.
+
+        Returns:
+            torch.Tensor: Image tensor.
+        """
+
         with rasterio.open(path) as src:
             array = src.read().astype("float32")
         tensor = torch.from_numpy(array)
@@ -645,6 +891,22 @@ def process_and_classify_samples(
     device,
     max_batches,
 ):
+    """
+    Extract activations, classify samples, and collect results.
+
+    Args:
+        layer_name (str): Name of the layer to extract activations from.
+        split (str): Dataset split - "train", "val", or "test".
+        dataloader (torch.utils.data.DataLoader): DataLoader for input samples.
+        model (torch.nn.Module): PyTorch model for inference.
+        classifier (object): Classifier for predictions.
+        device (str): Device for computations.
+        max_batches (int): Maximum number of batches to process.
+
+    Returns:
+        pd.DataFrame: DataFrame containing results with predictions, labels, and geolocation data.
+    """
+
     numeric_gt_labels_list = []
     clsf_pred_list = []
     ood_predictions_list = []
@@ -679,15 +941,12 @@ def process_and_classify_samples(
             lat_lon = [f"{lat}, {lon}" for lat, lon, _ in geo_data]
             filenames = [filename for _, _, filename in geo_data]
 
-            # Collect results in lists
             numeric_gt_labels_list.extend(gt_labels)
-            # numeric_gt_labels_list.extend(numeric_gt_labels)
             clsf_pred_list.extend(predicted_cls)
             ood_predictions_list.extend(ood_predictions)
             lat_lon_list.extend(lat_lon)
             filename_list.extend(filenames)
 
-    # Create DataFrame from collected lists
     results = pd.DataFrame(
         {
             "numeric_gt_labels": numeric_gt_labels_list,
@@ -704,24 +963,21 @@ def process_and_classify_samples(
 
 def get_coordinates_from_tiff(tiff_path):
     """
-    Extracts the latitude and longitude coordinates from a TIFF file.
+    Extract geographic coordinates from a GeoTIFF file.
 
     Args:
-        tiff_path (str): The path to the TIFF file.
+        tiff_path (str): Path to the TIFF file.
 
     Returns:
-        tuple: A tuple containing the latitude, longitude, and filename.
+        tuple: Latitude, longitude, and filename of the TIFF file.
     """
 
     with rasterio.open(tiff_path) as src:
-        # Get the metadata of the TIFF file
         meta = src.meta
-        # Extract the latitude and longitude in the projected CRS
         proj_lat = meta["transform"][5]
         proj_lon = meta["transform"][2]
         crs_proj = src.crs
 
-    # Define the projection of the TIFF file and the desired geographic projection
     projection = Proj(crs_proj)
     wgs84 = Proj(proj="latlong", datum="WGS84")
 
@@ -735,11 +991,22 @@ def get_coordinates_from_tiff(tiff_path):
 def get_activation_hook(activations, layer_name):
     def hook(model, input, output):
         activations[layer_name] = output.detach()
-
     return hook
 
 
 def extract_activations(model, inputs, layer_name, return_predicted_class=True):
+    """
+    Extract activations from a specific layer of a model during forward passes.
+
+    Args:
+        model (torch.nn.Module): The PyTorch model.
+        inputs (torch.Tensor): Input tensor for the model.
+        layer_name (str): Name of the layer to extract activations from.
+        return_predicted_class (bool): If True, returns predicted class logits as well.
+
+    Returns:
+        tuple: Contains activations from the specified layer and predicted class logits (if `return_predicted_class` is True).
+    """
     activations = {}
 
     # Register hook to the specified layer
@@ -766,12 +1033,33 @@ def extract_activations(model, inputs, layer_name, return_predicted_class=True):
 
 
 def save_results_to_csv(results, base_name, filename):
+    """
+    Save results to a CSV file.
+
+    Args:
+        results (pd.DataFrame): DataFrame containing the results to save.
+        base_name (str): Directory path where the file will be saved.
+        filename (str): Name of the CSV file.
+
+    Returns:
+        None
+    """
     csv_path = os.path.join(base_name, filename)
     results.to_csv(csv_path, index=False)
     print(f"Results saved to {csv_path}")
 
 
 def downsample_activations_for_ood_on_map(layer_activations, layer_name):
+    """
+    Downsample activations of a given layer using average pooling.
+
+    Args:
+        layer_activations (torch.Tensor): Activations for a specific layer.
+        layer_name (str): Name of the layer.
+
+    Returns:
+        dict: A dictionary with the downsampled activations.
+    """
     downsampled_activations = {}
 
     avg_pooled_activations = F.adaptive_avg_pool2d(layer_activations, (1, 1))
@@ -783,6 +1071,16 @@ def downsample_activations_for_ood_on_map(layer_activations, layer_name):
 
 
 def mean_std_concat(raw_downsampled_activations, layer):
+    """
+    Concatenate the mean and standard deviation of activations along the last axis.
+
+    Args:
+        raw_downsampled_activations (dict): Dictionary containing mean and standard deviation activations.
+        layer (str): Layer name for which activations are processed.
+
+    Returns:
+        np.ndarray: Concatenated array with shape (B, 2), where B is the batch size.
+    """
     means, stds = raw_downsampled_activations[layer]
     mean_array = np.array(means)
     std_array = np.array(stds)
@@ -798,14 +1096,15 @@ def mean_std_concat(raw_downsampled_activations, layer):
 
 def save_html_map(samples, base_directory, map_name):
     """
-    Saves an HTML map with markers for each sample in the given DataFrame.
-    Each sample is marked with a circle whose color indicates the binary result,
-    and a square border whose color shows the split (train, val, or test).
+    Save an HTML map with markers for geospatial data samples.
 
-    Parameters:
-    samples (pandas.DataFrame): A DataFrame with columns including 'lat_lon', 'ood_predictions', 'split', 'filename'.
-    base_directory (str): The base directory where the HTML file will be saved.
-    map_name (str): The name of the HTML file to save.
+    Args:
+        samples (pd.DataFrame): DataFrame containing coordinates, predictions, and split labels.
+        base_directory (str): Directory to save the HTML map.
+        map_name (str): Name of the HTML file to save.
+
+    Returns:
+        None
     """
     # Initialize the map at a central location with appropriate zoom level
     m = folium.Map(location=[40, 20], zoom_start=3, tiles="OpenStreetMap")
@@ -841,7 +1140,6 @@ def save_html_map(samples, base_directory, map_name):
             weight=2,
         ).add_to(m)
 
-    # Legend HTML for clarity and interpretation
     legend_html = """
      <div style="position: fixed; 
                  bottom: 50px; left: 50px; width: 150px; height: 120px; 
@@ -858,12 +1156,25 @@ def save_html_map(samples, base_directory, map_name):
      """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    # Save the map as an HTML file
     html_filename = os.path.join(base_directory, f"{map_name}.html")
     m.save(html_filename)
 
 
 def evaluate_model(model, dm, dataloader, device):
+    """
+    Evaluate a model using a DataLoader and return predictions and ground truth labels.
+
+    Args:
+        model (torch.nn.Module): The PyTorch model to evaluate.
+        dm: Data module that provides augmentations for input data.
+        dataloader (torch.utils.data.DataLoader): DataLoader to iterate over evaluation batches.
+        device (str): Device to run the model on ("cuda" or "cpu").
+
+    Returns:
+        tuple: 
+            - list: Ground truth labels for the evaluation data.
+            - list: Model predictions for the evaluation data.
+    """
     model.eval()
     all_preds = []
     all_labels = []
@@ -882,6 +1193,19 @@ def evaluate_model(model, dm, dataloader, device):
 
 
 def map_category_to_index(category):
+    """
+    Map a category name to its index in a predefined list.
+
+    Args:
+        category (str): The category name to map.
+
+    Returns:
+        int: Index of the category in the predefined list.
+
+    Raises:
+        ValueError: If the category is not found in the list.
+    """
+
     categories = [
         "AnnualCrop",
         "Forest",
@@ -899,5 +1223,4 @@ def map_category_to_index(category):
         print(f"Category not found in the list of categories: {category}")
         raise ValueError("Category not found in the list of categories.")
 
-    # Directly return the index of the category from the list
     return categories.index(category)

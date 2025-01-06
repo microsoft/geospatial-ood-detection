@@ -1,12 +1,12 @@
 defaults:
   - _self_
 
-exp_name: "portugal-wildfire-pre-post_02"
+exp_name: "xview2_nepal_flood_post_midwest_flood_post_05"
 
-id_ood_disaster: [{"disaster_name": "portugal-wildfire", "pre-post": "pre"}, {"disaster_name": "portugal-wildfire", "pre-post": "post"}]
+id_ood_disaster: [{"disaster_name": "nepal-flooding", "pre-post": "post"}, {"disaster_name": "midwest-flooding", "pre-post": "post"}]
 
 paths:
-  root: "./xview2/xview2/geotiffs"
+  root: "/data/dataood/xview2/"
   default_root_dir: "experiments"
 
 dataset:
@@ -23,7 +23,8 @@ training:
   patience: 5
   pin_memory: False
   persistent_workers: False
-  num_workers: 8
+  num_workers: 0
+  device: 'cuda'
 
 model:
   type: "unet"

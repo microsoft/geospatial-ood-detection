@@ -4,7 +4,6 @@
 """A package containing utilities for processing ID and WILD sets."""
 
 import os
-import pickle
 
 import cartopy.crs as ccrs
 import matplotlib.gridspec as gridspec
@@ -15,9 +14,7 @@ import seaborn as sns
 import torch
 import yaml
 from adjustText import adjust_text
-from matplotlib.colors import Normalize
 from matplotlib.lines import Line2D
-from matplotlib.patches import Rectangle
 from scipy.stats import skew
 from sklearn.manifold import TSNE
 from sklearn.metrics import (accuracy_score, f1_score, precision_score,
@@ -25,24 +22,31 @@ from sklearn.metrics import (accuracy_score, f1_score, precision_score,
 
 
 def load_config(config_path="config.yaml"):
+    """
+    Load configuration settings from a YAML file.
+
+    Args:
+        config_path (str): Path to the configuration file (default is "config.yaml").
+
+    Returns:
+        dict: Configuration settings as a dictionary.
+    """
     with open(config_path, "r") as file:
         config = yaml.safe_load(file)
     return config
 
 
-def save_data_dict_as_pkl(wild_data_dict, file_path):
-    with open(file_path, "wb") as f:
-        pickle.dump(wild_data_dict, f)
-    print(f"Wild data dictionary saved to {file_path}")
-
-
-def load_data_dict_from_pkl(file_path):
-    with open(file_path, "rb") as f:
-        data_dict = pickle.load(f)
-    return data_dict
-
-
 def calculate_metrics(true_masks, predicted_masks):
+    """
+    Calculate evaluation metrics (accuracy, precision, recall, and F1 score) for masks.
+
+    Args:
+        true_masks (array): Ground truth masks.
+        predicted_masks (array): Predicted masks.
+
+    Returns:
+        dict: Dictionary containing accuracy, precision, recall, and F1 score.
+    """
     # Flatten the masks to calculate metrics
     true_flat = true_masks.flatten()
     pred_flat = predicted_masks.flatten()
@@ -59,6 +63,15 @@ def calculate_metrics(true_masks, predicted_masks):
 
 
 def extract_data(country_results):
+    """
+    Extract and structure data from country-specific results.
+
+    Args:
+        country_results (dict): Dictionary containing results for multiple countries.
+
+    Returns:
+        pd.DataFrame: DataFrame with metrics and skewness values per country.
+    """
     data = []
     for country, results in country_results.items():
         g_pred_probs_testsetid = results["g_pred_probs_testsetid"]
@@ -82,28 +95,25 @@ def extract_data(country_results):
     return df
 
 
-def correlation_analysis(df):
-    # Select only numeric columns for correlation calculation
-    numeric_columns = df.select_dtypes(include=[np.number])
-    correlation_matrix = numeric_columns.corr()
-
-    sns.heatmap(correlation_matrix, annot=True, cmap="coolwarm")
-    plt.title("Correlation Matrix")
-    plt.show()
-
-
 def plot_f_and_g_preds_probab(
-    window_a, window_b, ood_label, output, filepath=None, filename=None
+    window_a, window_b, ood_label, output, filepath=None, filename=None, spacing=0.02
 ):
-    # Create a GridSpec with custom width ratios and reduced horizontal spacing
-    width_ratios = [4, 4, 0.5, 4]  # Aux column is 0.5 relative to image columns
-    fig = plt.figure(figsize=(20, 5))
-    gs = gridspec.GridSpec(
-        1, 4, width_ratios=width_ratios, wspace=0.05
-    )  # Set wspace to 0.05
+    """
+    Plot window_a, window_b, and output with the OOD label.
 
-    # Create subplots based on GridSpec
-    axes = [fig.add_subplot(gs[i]) for i in range(4)]
+    Args:
+        window_a (array): Image data for the first window.
+        window_b (array): Image data for the second window.
+        ood_label (str): The OOD label to display.
+        output (array): Image data for the output.
+        filepath (str): Directory to save the plot. If None, displays the plot.
+        filename (str): Name of the file to save.
+        spacing (float): Space between subplots (default is 0.02).
+    """
+    fig = plt.figure(figsize=(15, 5))
+    gs = gridspec.GridSpec(1, 3, width_ratios=[4, 4, 4], wspace=spacing)
+
+    axes = [fig.add_subplot(gs[i]) for i in range(3)]
 
     axes[0].imshow(window_a)
     axes[0].axis("off")
@@ -111,95 +121,11 @@ def plot_f_and_g_preds_probab(
     axes[1].imshow(window_b)
     axes[1].axis("off")
 
-    ax_aux = axes[2]
-    ax_aux.axis("off")
-    ax_aux.set_aspect("auto")
+    axes[2].imshow(output)
+    axes[2].axis("off")
 
-    # Define thermometer properties
-    thermometer_width = 0.2
-    thermometer_height = 0.6  # Reduced height to allow space for subtitle
-    thermometer_x = 0.4  # Centered in the aux axis
-    thermometer_y = 0.3  # Start from a slightly raised bottom to fit subtitle
-
-    # Normalize the colormap to the range [0, 1]
-    norm = Normalize(vmin=0, vmax=1)
-    cmap = plt.cm.bwr  # Blue-Red colormap
-
-    # Create an array of values from 0 to 1 for the gradient
-    gradient = np.linspace(0, 1, 256).reshape(-1, 1)
-
-    # Mask the gradient to fill only up to the ood_label value
-    mask = np.ones_like(gradient)
-    fill_index = int(ood_label * 256)
-    mask[fill_index:] = np.nan  # Set the upper part to NaN to make it transparent
-
-    # Plot the masked gradient as an image
-    ax_aux.imshow(
-        mask[::-1],
-        aspect="auto",
-        cmap=cmap,
-        norm=norm,  # Reverse the gradient to fill from bottom to top
-        extent=(
-            thermometer_x,
-            thermometer_x + thermometer_width,
-            thermometer_y,
-            thermometer_y + thermometer_height,
-        ),
-    )
-
-    # Draw the thermometer outline
-    outline = Rectangle(
-        (thermometer_x, thermometer_y),
-        thermometer_width,
-        thermometer_height,
-        linewidth=2,
-        edgecolor="black",
-        facecolor="none",
-    )
-    ax_aux.add_patch(outline)
-
-    # Add labels for 0 and 1
-    ax_aux.text(
-        thermometer_x - 0.05,
-        thermometer_y,
-        "0",
-        ha="left",
-        va="center",
-        fontsize=12,
-        color="black",
-    )
-    ax_aux.text(
-        thermometer_x - 0.05,
-        thermometer_y + thermometer_height,
-        "1",
-        ha="left",
-        va="center",
-        fontsize=12,
-        color="black",
-    )
-
-    # Display the ood_label value next to the filled portion
-    ax_aux.text(
-        thermometer_x + thermometer_width + 0.05,
-        thermometer_y + fill_index / 256 * thermometer_height,
-        f"{ood_label:.2f}",
-        ha="left",
-        va="center",
-        fontsize=12,
-        color="black",
-    )
-
-    axes[3].imshow(output)
-    axes[3].axis("off")
-
-    # Finalize the layout
-    plt.subplots_adjust(wspace=0.05)  # Ensure horizontal spacing is minimal
-
-    # Save the plot if filepath and filename are provided, otherwise show the plot
     if filepath is not None and filename is not None:
-        # Create the directory if it doesn't exist
         os.makedirs(filepath, exist_ok=True)
-        # Save the plot without borders and with a transparent background
         plt.savefig(
             os.path.join(filepath, filename),
             format="png",
@@ -207,25 +133,24 @@ def plot_f_and_g_preds_probab(
             pad_inches=0,
             transparent=True,
         )
-        plt.close(fig)  # Close the figure to free up memory
+        plt.close(fig)
     else:
-        # Show the plot
         plt.show()
+        plt.close(fig)
 
 
 def percentile_stretch(image, lower_percentile=2, upper_percentile=98):
     """
-    Stretch the image values based on percentiles.
+    Normalize an image using percentile-based clipping.
 
     Args:
-    - image (numpy array or tensor): Input image to normalize.
-    - lower_percentile (int): Lower bound percentile for clipping (default is 2).
-    - upper_percentile (int): Upper bound percentile for clipping (default is 98).
+        image (array or Tensor): Input image.
+        lower_percentile (int): Lower percentile for clipping (default is 2).
+        upper_percentile (int): Upper percentile for clipping (default is 98).
 
     Returns:
-    - normalized_image (numpy array or tensor): Image after percentile-based normalization.
+        array: Normalized image after percentile-based clipping.
     """
-    # Convert the image to a numpy array if it's a tensor
     if isinstance(image, torch.Tensor):
         image = image.cpu().numpy()
 
@@ -246,15 +171,15 @@ def plot_g_prob_distribution_w_skewness(
     g_probs, suffix, skewness_value, save_plot=True
 ):
     """
-    Plots the distribution of probabilities with a given skewness value as text annotation.
+    Plot the distribution of probabilities with skewness annotation.
 
-    Parameters:
-    g_probs (numpy array): Array of probabilities.
-    suffix (str): Suffix to be added.
-    skewness_value (float): Skewness value to be displayed on the plot.
+    Args:
+        g_probs (array): Array of probabilities.
+        suffix (str): Suffix for the plot labels.
+        skewness_value (float): Skewness value to display.
+        save_plot (bool): Whether to save the plot.
     """
-    # Create the histogram with adjusted binning
-    counts, bins, patches = plt.hist(
+    counts, _, _ = plt.hist(
         g_probs,
         bins=np.linspace(0, 1, 31),
         color="orange",
@@ -262,10 +187,8 @@ def plot_g_prob_distribution_w_skewness(
         edgecolor="grey",
     )
 
-    # Add grid to the plot
     plt.grid(True)
 
-    # Determine the maximum y-value for text placement
     max_height = max(counts)
 
     # Add text annotation for skewness value
@@ -287,8 +210,8 @@ def plot_g_prob_distribution_w_skewness(
 
     if save_plot:
         plt.savefig(
-            f"g_prob_distribution_{suffix}.svg",
-            format="svg",
+            f"./plots/g_prob_distribution_{suffix}.png",
+            dpi=300,
             bbox_inches="tight",
             pad_inches=0,
             transparent=True,
@@ -297,7 +220,14 @@ def plot_g_prob_distribution_w_skewness(
 
 
 def plot_histograms_for_countries(country_results, metric="accuracy", num_cols=5):
+    """
+    Plot histograms of prediction probabilities for multiple countries.
 
+    Args:
+        country_results (dict): Results containing probabilities and metrics for countries.
+        metric (str): Metric to annotate on the plots (default is "accuracy").
+        num_cols (int): Number of columns in the grid layout (default is 5).
+    """
     all_countries = list(country_results.keys())
     num_countries = len(all_countries)
     num_rows = (num_countries + num_cols - 1) // num_cols
@@ -321,8 +251,7 @@ def plot_histograms_for_countries(country_results, metric="accuracy", num_cols=5
         below_0_5_percentage = (below_0_5 / len(g_pred_probs_testsetid)) * 100
         above_0_5_percentage = (above_0_5 / len(g_pred_probs_testsetid)) * 100
 
-        # Create the histogram with adjusted binning
-        counts, bins, patches = ax.hist(
+        counts, _, _ = ax.hist(
             g_pred_probs_testsetid,
             bins=np.linspace(0, 1, 31),
             alpha=0.75,
@@ -332,10 +261,8 @@ def plot_histograms_for_countries(country_results, metric="accuracy", num_cols=5
         # Add a vertical dashed line at 0.5
         ax.axvline(x=0.5, color="gray", linestyle="--")
 
-        # Determine the maximum y-value for text placement
         max_height = max(counts)
 
-        # Add text annotations for counts and percentages
         ax.text(
             0.25,
             max_height * 0.95,
@@ -377,19 +304,15 @@ def plot_histograms_for_countries(country_results, metric="accuracy", num_cols=5
                 bbox=dict(facecolor="white", alpha=0.5),
             )
 
-        # Add labels
         ax.set_xlabel(r"$P(y=1 \mid \mathbf{x}_" + "{" + country + "}" + ")$")
         ax.set_ylabel("Frequency")
 
-        # Remove the upper and right spines
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
-    # Remove any unused subplots
     for j in range(i + 1, len(axes)):
         fig.delaxes(axes[j])
 
-    # Add a main title to the figure
     fig.suptitle(
         f"Histogram Plots for All Countries with {metric.capitalize()}", fontsize=16
     )
@@ -400,51 +323,88 @@ def plot_histograms_for_countries(country_results, metric="accuracy", num_cols=5
     plt.show()
 
 
-def visualize_data(df, save_plot=False):
-    metrics_to_plot = ["accuracy", "precision", "recall", "f1"]
+def plot_ftwtest_f1_skew_r2(df, save_plot=False):
+    """
+    Plot scatterplots of skewness against performance metrics with R² line.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing skewness and metrics.
+        save_plot (bool): Whether to save the plot.
+    """
+    plt.rcParams.update({"font.size": 16})
+    metrics_to_plot = ["f1", "accuracy", "precision", "recall"]
 
     for metric in metrics_to_plot:
-        plt.figure(figsize=(10, 8))
+        plt.figure(figsize=(12, 10))
         ax = sns.scatterplot(
-            x="skew_prob", y=metric, data=df, label="Countries", color="darkgreen"
+            x="skew_prob",
+            y=metric,
+            data=df,
+            label="Countries",
+            color="darkgreen",
+            s=100,  # Marker size
         )
 
-        # Add a horizontal line for the mean of the metric
-        plt.axhline(y=df[metric].mean(), color="grey", linestyle="--", label="Mean")
+        ax.set_ylim(0.3, 1)
 
-        # Add corresponding negative x ticks
         x_ticks = ax.get_xticks()
         x_ticks = sorted(set(x_ticks.tolist() + [0]))
         ax.set_xticks(x_ticks)
 
-        # Start x-axis from 0
         ax.set_xlim(left=0)
 
-        # Add background grid
-        ax.grid(True)
+        ax.grid(False)
 
-        plt.xlabel("Skewness of Probability Distribution")
-        plt.ylabel(metric.capitalize())
+        ax.spines["bottom"].set_linewidth(1.5)
+        ax.spines["left"].set_linewidth(1.5)
+        ax.spines["bottom"].set_color("black")
+        ax.spines["left"].set_color("black")
 
-        # Remove the top and right plot panes
+        ax.tick_params(axis="x", labelsize=18)
+        ax.tick_params(axis="y", labelsize=18)
+
+        plt.xlabel(r"Skewness of $P(y = 1 \mid g)$", fontsize=18)
+        plt.ylabel(r"$F_1$ score of $f$ on FTW test set", fontsize=18)
+
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
-        plt.legend()
+        x = df["skew_prob"]
+        y = df[metric]
+        slope, intercept = np.polyfit(x, y, 1)
+        r_squared = np.corrcoef(x, y)[0, 1] ** 2
 
-        # Annotate each point with the country name
+        x_sorted = np.sort(x)
+        plt.plot(
+            x_sorted,
+            slope * x_sorted + intercept,
+            linestyle=(0, (5, 5)),
+            color="grey",
+            linewidth=1.5,
+            label=rf"Best Fit (R$^2$ = {r_squared:.2f})",
+        )
+
+        plt.legend(fontsize=18, loc="lower right")
+
+        offset_x = 0.3
+        offset_y = 0.0
         texts = []
         for i in range(df.shape[0]):
             texts.append(
-                ax.text(df["skew_prob"][i], df[metric][i], df["country"][i], fontsize=9)
+                ax.text(
+                    df["skew_prob"][i] + offset_x,
+                    df[metric][i] + offset_y,
+                    df["country"][i],
+                    fontsize=18,
+                )
             )
 
-        # Adjust text to minimize overlap
         adjust_text(texts, arrowprops=dict(arrowstyle="-", color="grey"))
 
-        save_plot = True
         if save_plot:
-            plt.savefig(f"skewness_vs_{metric}.svg", bbox_inches="tight", dpi=300)
+            plt.savefig(
+                f"./plots/skewness_vs_{metric}.pdf", bbox_inches="tight", dpi=300
+            )
         plt.show()
 
 
@@ -458,30 +418,38 @@ def plot_ID_WILD(
     filename="geospatial_plot",
 ):
     """
-    Plots geospatial data on an Equal Earth projection.
+    Plot geospatial coordinates for ID and WILD samples on an Equal Earth projection.
 
-    Parameters:
-    - ID_all: Dictionary containing 'coords' key with in-distribution coordinates as list of tuples [(lat, lon), ...].
-    - WILD_all: Dictionary containing 'coords' key with WILD coordinates as list of tuples [(lat, lon), ...].
-    - save: Boolean, whether to save the plot or not.
-    - file_format: Format to save the plot ('pdf', 'png', etc.).
-    - dpi: DPI for the saved plot.
-    - filepath: Directory to save the plot.
-    - filename: Name of the saved plot file without extension.
+    Args:
+        ID_all (dict): Dictionary containing coordinates for ID samples.
+        WILD_all (dict): Dictionary containing coordinates for WILD samples.
+        save (bool): Whether to save the plot.
+        file_format (str): File format for saving the plot.
+        dpi (int): DPI for the saved plot.
+        filepath (str): Directory to save the plot.
+        filename (str): Name of the file to save.
     """
-
     fontsize = 14
     plt.rcParams.update({"font.size": fontsize})
 
-    id_lats = [coord[0].item() for coord in ID_all["coords"]]
-    id_lons = [coord[1].item() for coord in ID_all["coords"]]
-    wild_lats = [coord[0].item() for coord in WILD_all["coords"]]
-    wild_lons = [coord[1].item() for coord in WILD_all["coords"]]
+    id_coords = np.array(
+        [[coord[0].item(), coord[1].item()] for coord in ID_all["coords"]]
+    )
 
-    # Set a seaborn style
+    # Separate latitudes and longitudes
+    id_lats = id_coords[:, 0]
+    id_lons = id_coords[:, 1]
+
+    # Ensure WILD_all['coords'] is a NumPy array
+    wild_coords = np.array(
+        [[coord[0].item(), coord[1].item()] for coord in WILD_all["coords"]]
+    )
+
+    wild_lats = wild_coords[:, 0]
+    wild_lons = wild_coords[:, 1]
+
     sns.set(style="whitegrid", palette="pastel")
 
-    # Set up the figure and axis with the Equal Earth projection
     fig, ax = plt.subplots(
         figsize=(12, 8), subplot_kw={"projection": ccrs.EqualEarth()}
     )
@@ -494,44 +462,68 @@ def plot_ID_WILD(
     # Add Natural Earth relief raster
     ax.stock_img()
 
-    # Plot ID coordinates (in blue)
+    # Plot ID coordinates
     ax.scatter(
         id_lons,
         id_lats,
         transform=ccrs.PlateCarree(),
         marker="^",
-        color="tomato",
+        color="mediumorchid",
         label="In-distribution",
-        s=50,
+        s=10,
         alpha=1,
-        edgecolor="white",
+        edgecolor=None,
         linewidth=0.5,
     )
 
-    # Plot WILD coordinates (in red)
+    # Plot WILD coordinates
     ax.scatter(
         wild_lons,
         wild_lats,
         transform=ccrs.PlateCarree(),
-        marker="^",
-        color="mediumpurple",
+        marker="o",
+        color="green",
         label="WILD",
-        s=50,
+        s=10,
         alpha=1,
-        edgecolor="white",
+        edgecolor=None,
         linewidth=0.5,
     )
 
-    # Add a legend with a fancy box
-    plt.legend(
-        loc="lower left", fancybox=True, fontsize=12, markerscale=1.5, borderaxespad=1.5
-    )
-    ax.set_xticks([])
-    ax.set_yticks([])
+    legend_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor="green",
+            markersize=10,
+            label="WILD",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="^",
+            color="w",
+            markerfacecolor="mediumorchid",
+            markersize=10,
+            label="In-distribution",
+        ),
+    ]
 
-    # Adjust layout and remove whitespace
-    plt.tight_layout()
-    plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    plt.legend(
+        handles=legend_handles,
+        loc="center left",
+        bbox_to_anchor=(-0.1, 0.5),
+        frameon=True,
+        fancybox=True,
+        fontsize=10,
+    )
+
+    plt.xlabel("")
+    plt.ylabel("")
+    plt.xticks([])
+    plt.yticks([])
 
     if save:
         os.makedirs(filepath, exist_ok=True)
@@ -540,10 +532,11 @@ def plot_ID_WILD(
             format=file_format,
             bbox_inches="tight",
             pad_inches=0,
-            dpi=dpi,
             transparent=True,
+            dpi=dpi,
         )
 
+    plt.tight_layout()
     plt.show()
 
 
@@ -557,18 +550,17 @@ def plot_ID_surrID_surrOOD(
     filename="geospatial_plot",
 ):
     """
-    Plots geospatial prediction data on an Equal Earth projection.
+    Plot geospatial predictions for ID and WILD samples with predictions on an Equal Earth map.
 
-    Parameters:
-    - WILD_all: Dictionary containing 'coords' key with WILD coordinates and 'g_pred_probs' with prediction probabilities.
-    - ID_all: Dictionary containing 'coords' key with in-distribution coordinates.
-    - save: Boolean, whether to save the plot or not.
-    - file_format: Format to save the plot ('pdf', 'png', 'svg', etc.).
-    - dpi: DPI for the saved plot.
-    - filepath: Directory to save the plot.
-    - filename: Name of the saved plot file without extension.
+    Args:
+        WILD_all (dict): WILD coordinates and predictions.
+        ID_all (dict): In-distribution coordinates.
+        save (bool): Whether to save the plot.
+        file_format (str): File format for saving the plot.
+        dpi (int): DPI for the saved plot.
+        filepath (str): Directory to save the plot.
+        filename (str): Name of the file to save.
     """
-
     plt.rcParams.update({"font.size": 14})
 
     lats = []
@@ -583,18 +575,12 @@ def plot_ID_surrID_surrOOD(
         lons.append(float(lon))
         value = WILD_all["g_pred_probs"][idx]
         binary_dict_probs_to_binary = np.where(value > 0.5, 1, 0)
-        colors.append(
-            "#FF6347" if binary_dict_probs_to_binary == 1 else "#4682B4"
-        )  # Use Tomato for OOD and SteelBlue for ID
-        edge_colors.append(
-            "#FF6347" if binary_dict_probs_to_binary == 1 else "#4682B4"
-        )  # Use Tomato for OOD and SteelBlue for ID
+        colors.append("#FF9933" if binary_dict_probs_to_binary == 1 else "#1BA1E2")
+        edge_colors.append("#FF9933" if binary_dict_probs_to_binary == 1 else "#1BA1E2")
         markers.append("o")
 
-    # Set a seaborn style
     sns.set(style="whitegrid", palette="pastel")
 
-    # Set up the figure and axis with the Equal Earth projection
     fig, ax = plt.subplots(
         figsize=(12, 8), subplot_kw={"projection": ccrs.EqualEarth()}
     )
@@ -616,15 +602,18 @@ def plot_ID_surrID_surrOOD(
             marker=marker,
             color=color,
             label="Coordinates",
-            s=40,
-            alpha=0.9,
+            s=10,
+            alpha=1,
             edgecolor=None,
             linewidth=1,
         )
 
-    # Plot ID coordinates
-    id_lats = [coord[0].item() for coord in ID_all["coords"]]
-    id_lons = [coord[1].item() for coord in ID_all["coords"]]
+    id_coords = np.array(ID_all["coords"])
+
+    # Separate latitudes and longitudes directly
+    id_lats = id_coords[:, 0]  # All latitude values
+    id_lons = id_coords[:, 1]  # All longitude values
+
     ax.scatter(
         id_lons,
         id_lats,
@@ -632,7 +621,7 @@ def plot_ID_surrID_surrOOD(
         marker="^",
         color="mediumorchid",
         label="In-distribution",
-        s=40,
+        s=10,
         alpha=1,
         edgecolor=None,
         linewidth=0.5,
@@ -644,18 +633,18 @@ def plot_ID_surrID_surrOOD(
             [0],
             marker="o",
             color="w",
-            markerfacecolor="#4682B4",
+            markerfacecolor="#1BA1E2",
             markersize=10,
-            label=r"$\text{g*} \text{ Prediction: In-distribution}$",
+            label=r"$\mathit{g} \text{ Prediction: In-distribution}$",
         ),
         Line2D(
             [0],
             [0],
             marker="o",
             color="w",
-            markerfacecolor="#FF6347",
+            markerfacecolor="#FF9933",
             markersize=10,
-            label=r"$\text{g*} \text{ Prediction: Out-of-distribution}$",
+            label=r"$\mathit{g} \text{ Prediction: Out-of-distribution}$",
         ),
         Line2D(
             [0],
@@ -699,20 +688,19 @@ def plot_ID_surrID_surrOOD(
 
 def plot_tsne(X, y, y_clustered):
     """
-    Plots t-SNE visualizations with original and clustered labels.
+    Plot t-SNE visualizations for original and clustered labels.
 
-    Parameters:
-    - X: The input data for t-SNE.
-    - y: The original labels.
-    - y_clustered: The clustered labels.
+    Args:
+        X (array): Input feature matrix for t-SNE.
+        y (array): Original labels.
+        y_clustered (array): Clustered labels.
     """
     if y is not None and y_clustered is not None:
-        # Define the colors for the discrete colormap
         cmap_discrete = plt.cm.get_cmap("coolwarm", 2)  # 2 colors for 0, and 2
         colors_discrete = [
             cmap_discrete(0),
             cmap_discrete(1),
-        ]  # Blue for 0, Yellow for 2->1, Green for 2->0
+        ]  # Three discrete colors for 0, 2->1, and 2->0
 
         # Perform t-SNE
         tsne = TSNE(n_components=2, random_state=42)
@@ -735,15 +723,14 @@ def plot_tsne(X, y, y_clustered):
             colors_discrete
         )  # Set the facecolor to match the discrete colormap
 
-        # Define the colors for the clustered colormap
         cmap_clustered = plt.cm.get_cmap(
             "coolwarm", 3
-        )  # 3 colors for 0, 2->1, and 2->0
+        )  # Three colors for 0, 2->1, and 2->0
         colors_clustered = [
             cmap_clustered(0),
             "yellow",
             "green",
-        ]  # Blue for 0, Yellow for 2->1, Green for 2->0
+        ]  # Three colors for 0, 2->1, and 2->0
 
         # Plot t-SNE with clustered labels (y_clustered)
         scatter2 = axes[1].scatter(
@@ -753,14 +740,9 @@ def plot_tsne(X, y, y_clustered):
         axes[1].set_xlabel("t-SNE Component 1")
         axes[1].set_ylabel("t-SNE Component 2")
         fig.colorbar(scatter2, ax=axes[1], label="Clustered Label", ticks=np.arange(3))
-        scatter2.set_clim(
-            -0.5, 2.5
-        )  # Set the color limits to match the clustered colormap
-        scatter2.set_facecolor(
-            colors_clustered
-        )  # Set the facecolor to match the clustered colormap
+        scatter2.set_clim(-0.5, 2.5)
+        scatter2.set_facecolor(colors_clustered)
 
-        # Show the plots
         plt.tight_layout()
         plt.show()
     else:
@@ -776,40 +758,37 @@ def plot_wild_coordinates(
     filename="g_wild_map_equal_earth",
 ):
     """
-    Plots WILD coordinates on an Equal Earth projection.
+    Plot WILD coordinates on an Equal Earth projection.
 
-    Parameters:
-    - wild_coords_all: List of tuples [(lat, lon), ...] containing WILD coordinates.
-    - save: Boolean, whether to save the plot or not.
-    - file_format: Format to save the plot ('pdf', 'png', etc.).
-    - dpi: DPI for the saved plot.
-    - filepath: Directory to save the plot.
-    - filename: Name of the saved plot file without extension.
+    Args:
+        wild_coords_all (list): List of WILD coordinates (latitude, longitude).
+        save (bool): Whether to save the plot.
+        file_format (str): File format for saving the plot.
+        dpi (int): DPI for the saved plot.
+        filepath (str): Directory to save the plot.
+        filename (str): Name of the file to save.
     """
-
     fontsize = 14
     plt.rcParams.update({"font.size": fontsize})
 
     wild_lats = [coord[0].item() for coord in wild_coords_all]
     wild_lons = [coord[1].item() for coord in wild_coords_all]
 
-    # Set a seaborn style
     sns.set(style="whitegrid", palette="pastel")
 
-    # Set up the figure and axis with the Equal Earth projection
+    # Figure and axis with the Equal Earth projection
     fig, ax = plt.subplots(
         figsize=(12, 8), subplot_kw={"projection": ccrs.EqualEarth()}
     )
 
-    # Add coastlines at 110 m resolution, can be changed to 10 and 50 m
+    # Coastlines at 110 m resolution, can be changed to 10 and 50 m
     ax.coastlines("110m", "grey", lw=1)
     ax.gridlines()
     ax.set_global()
 
-    # Add Natural Earth relief raster
     ax.stock_img()
 
-    # Plot WILD coordinates (in red)
+    # Plot WILD coordinates
     ax.scatter(
         wild_lons,
         wild_lats,
@@ -823,14 +802,12 @@ def plot_wild_coordinates(
         linewidth=0.5,
     )
 
-    # Add a legend with a fancy box
     plt.legend(
         loc="lower left", fancybox=True, fontsize=12, markerscale=1.5, borderaxespad=1.5
     )
     ax.set_xticks([])
     ax.set_yticks([])
 
-    # Adjust layout and remove whitespace
     plt.tight_layout()
     plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
 

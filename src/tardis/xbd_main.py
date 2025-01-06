@@ -16,12 +16,8 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from omegaconf import DictConfig, OmegaConf
 from torchgeo.trainers import SemanticSegmentationTask
 
-from .xview2_datamodule import XView2DataModuleOOD
-
-
-def normalize(x):
-    return x / 255.0
-
+from xbd_datamodule import XView2DataModuleOOD
+from eurosat_xbd_utils import normalize
 
 @hydra.main(
     version_base=None,

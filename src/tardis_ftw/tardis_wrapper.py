@@ -25,46 +25,55 @@ from sklearn.preprocessing import StandardScaler
 
 def get_model_layers(model: nn.Module) -> list:
     """
-    Utility method to return the list of layers in a model.
+    Retrieve the list of layer names in a PyTorch model.
+
     Args:
         model (nn.Module): The PyTorch model.
 
     Returns:
-        list: A list of layer names in the model.
+        list: A list of layer names.
     """
     return [name for name, _ in model.named_modules()]
 
 
 def hook_layer(model: nn.Module, layer_name: str, hook_fn):
     """
-    Hook a function to a specific layer of the model.
+    Attach a forward hook to a specific layer in a model.
+
     Args:
         model (nn.Module): The PyTorch model.
         layer_name (str): The name of the layer to hook.
-        hook_fn (callable): The function to execute when the layer is called.
+        hook_fn (callable): The function to execute during forward pass.
 
     Returns:
-        hook: The registered hook.
+        hook: The registered hook handle.
     """
     layer = dict(model.named_modules())[layer_name]
     hook = layer.register_forward_hook(hook_fn)
     return hook
 
 
-class OODModelWrapper(nn.Module):
+class TARDISWrapper(nn.Module):
     """
-    A wrapper class that enhances a base model with out-of-distribution (OOD) detection capabilities.
+    Wrapper class for a PyTorch model with out-of-distribution (OOD) detection capabilities.
 
     Args:
-        base_model (nn.Module): The original PyTorch model.
-        hook_layer_name (str): The name of the layer to hook for feature extraction.
-        id_tensor (torch.Tensor): The tensor representing the ID samples.
-        wild_tensor (torch.Tensor): The tensor representing the unknown/OOD samples.
-        num_clusters (int): The number of clusters to use in KMeans.
-        random_state (int): The random state for reproducibility.
-        n_estimators (int): The number of estimators for the RandomForestClassifier.
-        test_size (float): The proportion of the dataset to include in the test split.
-        M (float): The threshold for determining OOD clusters.
+        base_model (nn.Module): The PyTorch model to wrap.
+        hook_layer_name (str): The name of the layer to extract features from.
+        main_loader: DataLoader for the main dataset.
+        id_loader: DataLoader for in-distribution samples.
+        wild_loader: DataLoader for unknown/OOD samples.
+        n_batches_to_process (int): Number of batches to process from each loader.
+        test_size (float): Test set proportion for training the classifier.
+        use_optuna (bool): If True, uses Optuna for clustering parameter tuning.
+        num_clusters (int): Number of clusters for KMeans.
+        M (float): Threshold for identifying OOD clusters.
+        random_state (int): Random state for reproducibility.
+        n_estimators (int): Number of estimators for the RandomForest classifier.
+        resize_factor (int): Factor for resizing image patches.
+        patch_size (int): Size of the image patch.
+        device (str): Device to run computations on ("cuda" or "cpu").
+        classifier_save_path (str): Path to save the trained OOD classifier.
     """
 
     def __init__(
@@ -86,7 +95,7 @@ class OODModelWrapper(nn.Module):
         device="cuda",
         classifier_save_path: str = "ood_classifier.pkl",
     ):
-        super(OODModelWrapper, self).__init__()
+        super(TARDISWrapper, self).__init__()
         self.base_model = base_model
         self.hooked_features = []
         self.hook_handle = None
@@ -122,7 +131,9 @@ class OODModelWrapper(nn.Module):
         self.load_classifier()
 
     def configure_hook(self):
-        """Configure a hook on the specified layer to extract features during the forward pass."""
+        """
+        Register a forward hook to the specified layer for feature extraction.
+        """
 
         def hook_fn(module, input, output):
             self.hooked_features.append(output)
@@ -133,7 +144,15 @@ class OODModelWrapper(nn.Module):
             )
 
     def forward(self, x):
-        """Forward pass through the base model."""
+        """
+        Perform a forward pass through the base model.
+
+        Args:
+            x (torch.Tensor): Input tensor to the model.
+
+        Returns:
+            torch.Tensor: The model's output.
+        """
         return self.base_model(x)
 
     def get_id_coords(self):
@@ -144,17 +163,10 @@ class OODModelWrapper(nn.Module):
 
     def compute_features(self):
         """
-        Compute and return the features extracted from the hooked layer for both ID and WILD samples.
-
-        Args:
-            id_loader (DataLoader): DataLoader for ID (in-distribution) samples.
-            wild_loader (DataLoader): DataLoader for Unknown (WILD) samples.
-            n_batches_to_process (int, optional): Number of batches to process from each DataLoader. Processes all if None.
+        Compute features from the hooked layer for ID and WILD samples.
 
         Returns:
-            tuple: A tuple containing:
-                - X (np.ndarray): Combined feature matrix from both ID and WILD samples.
-                - y (np.ndarray): Labels indicating ID (0) and WILD (2) samples.
+            tuple: A tuple containing the feature matrix (X) and corresponding labels (y).
         """
         print("Computing features...")
 
@@ -229,16 +241,14 @@ class OODModelWrapper(nn.Module):
 
     def feature_space_clustering(self, X, y):
         """
-        Perform clustering on the feature space and assign labels for OOD detection.
+        Cluster features using KMeans to identify OOD clusters.
 
         Args:
-            X (np.ndarray): The feature matrix.
-            y (np.ndarray): Initial labels (0 for ID, 2 for WILD).
+            X (np.ndarray): Feature matrix.
+            y (np.ndarray): Labels for in-distribution (0) and WILD samples (2).
 
         Returns:
-            tuple: A tuple containing:
-                - X (np.ndarray): The input feature matrix.
-                - y_clustered (np.ndarray): Labels indicating ID (0) and WILD (1) samples after clustering.
+            np.ndarray: Labels indicating ID (0) and WILD (1) after clustering.
         """
         print("Clustering feature space...")
 
@@ -276,7 +286,9 @@ class OODModelWrapper(nn.Module):
         return self.y_clustered
 
     def save_classifier(self):
-        """Save the trained OOD classifier to a file."""
+        """
+        Save the trained OOD classifier to a file.
+        """
         if self.ood_classifier is not None:
             joblib.dump(self.ood_classifier, self.classifier_save_path)
             print(f"OOD classifier saved to {self.classifier_save_path}")
@@ -284,7 +296,9 @@ class OODModelWrapper(nn.Module):
             print("No OOD classifier to save.")
 
     def load_classifier(self):
-        """Load the OOD classifier from a file if it exists."""
+        """
+        Load the OOD classifier from a file if it exists.
+        """
         try:
             self.ood_classifier = joblib.load(self.classifier_save_path)
             print(f"OOD classifier loaded from {self.classifier_save_path}")
@@ -298,17 +312,13 @@ class OODModelWrapper(nn.Module):
         Train a classifier on the clustered features and evaluate its performance.
 
         Args:
-            X (np.ndarray): The feature matrix.
-            y (np.ndarray): The labels (0 for Surrogate ID, 1 for Surrogate OOD).
-            save_classifier (bool): Whether to save the trained classifier.
+            X (np.ndarray): Feature matrix.
+            y (np.ndarray): Labels (0 for ID, 1 for OOD).
+            save_classifier (bool): If True, saves the trained classifier.
 
         Returns:
-            dict: A dictionary containing evaluation metrics such as accuracy, ROC AUC, FPR95, and a classification report.
-
-        Raises:
-            ValueError: If the validation set contains only one class.
+            dict: Dictionary containing evaluation metrics.
         """
-
         if self.ood_classifier is not None:
             print("Using existing OOD classifier...")
             return self.ood_classifier_metrics
@@ -348,7 +358,7 @@ class OODModelWrapper(nn.Module):
             )
 
         y_proba = model.predict_proba(X_val)[:, 1]
-        fpr, tpr, thresholds = roc_curve(y_val, y_proba)
+        fpr, tpr, _ = roc_curve(y_val, y_proba)
         roc_auc = auc(fpr, tpr)
 
         # Compute FPR95%
@@ -371,15 +381,14 @@ class OODModelWrapper(nn.Module):
 
     def f_g_prediction(self, new_tensor, upsample=False):
         """
-        Predict the model's output and classify the samples as ID (0) or OOD (1).
+        Predict and classify new samples as ID or OOD.
 
         Args:
-            new_tensor (torch.Tensor): A tensor representing the new samples to classify.
+            new_tensor (torch.Tensor): Input tensor for prediction.
+            upsample (bool): If True, upsamples the input tensor.
 
         Returns:
-            tuple: A tuple containing:
-                - predictions (torch.Tensor): The model's predictions for the new samples.
-                - ood_labels (np.ndarray): labels (0 for ID, 1 for OOD).
+            tuple: Model predictions and OOD classification probabilities.
         """
         # Ensure the OOD classifier is loaded or trained
         if self.ood_classifier is None:
@@ -416,6 +425,17 @@ class OODModelWrapper(nn.Module):
 
 
 def calculate_average_entropy(cluster_labels, true_labels, num_clusters):
+    """
+    Calculate the average entropy for clusters to evaluate uncertainty.
+
+    Args:
+        cluster_labels (np.ndarray): Cluster labels for samples.
+        true_labels (np.ndarray): True labels for samples.
+        num_clusters (int): Total number of clusters.
+
+    Returns:
+        float: The average entropy across clusters.
+    """
     cluster_entropy = []
     for cluster_idx in range(num_clusters):
         # True labels for samples in the current cluster
@@ -433,21 +453,21 @@ def calculate_average_entropy(cluster_labels, true_labels, num_clusters):
 
 def fine_tune_clustering_params(X_search, y_search):
     """
-    Fine-tune the clustering parameters k and M using Optuna.
+    Fine-tune clustering parameters (k and M) using Optuna.
 
     Args:
-        X_search (np.ndarray): The feature matrix for the search.
-        y_search (np.ndarray): The labels for the search.
+        X_search (np.ndarray): Feature matrix for tuning.
+        y_search (np.ndarray): Labels for tuning.
 
     Returns:
-        dict: A dictionary containing the best parameters and metrics.
+        dict: Dictionary containing the best parameters and metrics.
     """
 
     def objective(trial):
         # Dynamically calculate X and Y based on the length of X_search
         len_X_search = len(X_search)
-        X = int(0.1 * len_X_search)  # 10% of the data
-        Y = int(0.4 * len_X_search)  # 40% of the data
+        X = 2
+        Y = int(0.3 * len_X_search)  # 30% of the data
 
         # Suggest values for the hyperparameters within the constrained range for k
         k = trial.suggest_int("k", X, Y)

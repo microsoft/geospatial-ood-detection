@@ -1,16 +1,16 @@
 defaults:
   - _self_
 
-exp_name: eurosat_spatial_0776
+exp_name: Holdout_Residential_resnet50_0066
 
 model:
   name: resnet50
   weights: true
   in_channels: 13
-  num_classes: 10
+  num_classes: 9
   loss: ce
   lr: 0.0001
-  patience: 7
+  patience: 5
 
 trainer: 
   devices: 1
@@ -19,12 +19,14 @@ trainer:
   max_epochs: 50
 
 data:
-  root: "./data_spatial_eurosat"
+  class_name: Residential
+  root: "/data/dataood/eurosat_holdout_datasets/eurosat_holdout_Residential"
   batch_size: 64
   num_workers: 8
   download: true
-  checksum: true
-
+  checksum: false
+  drop_last: false
+  
 logging:
   path: ./geospatial-ood-detection/experiments
 
