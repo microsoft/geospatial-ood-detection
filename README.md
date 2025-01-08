@@ -7,7 +7,7 @@
 *4. Fitting a binary classifier \( g \) on the labeled feature representations to distinguish between ID and OOD samples. The classifier, during deployment, flags out-of-distribution inputs.*
 
 ## Approach 
-TARDIS is a post-hoc OOD detection method designed for scalable geospatial deployments. It works by extracting internal activations from a pre-trained model, clustering the feature space, and assigning surrogate labels to WILD samples as either in-distribution (ID) or out-of-distribution (OOD). These surrogate labels are then used to train a binary classifier, enabling OOD detection during inference without compromising the model's primary task performance. The method is computationally efficient, making it practical for large-scale real-world deployments. For more details, check out our [paper](TBP).
+TARDIS is a post-hoc OOD detection method designed for scalable geospatial deployments. It works by extracting internal activations from a pre-trained model, clustering the feature space, and assigning surrogate labels to WILD samples as either in-distribution (ID) or out-of-distribution (OOD). These surrogate labels are then used to train a binary classifier, enabling OOD detection during inference without compromising the model's primary task performance. The method is computationally efficient, making it practical for large-scale real-world deployments. For more details, check out our [paper](https://arxiv.org/abs/2412.13394).
 
 ## Overview
 We first demonstrate our method on two datasets, _EuroSAT_ and _xBD_, under 17 experimental setups involving covariate and semantic shifts. This is implemented in `notebooks/eurosat_exp.ipynb` and `notebooks/xbd_exp.ipynb`, with the corresponding code in `src/tardis/`.  
